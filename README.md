@@ -15,6 +15,10 @@
 - `lite/` — 서버 없이 도는 데모 엔진(모의 매매·차트·지표, `shim.js`가 `/api/*`를 가로챕니다)
 - `backend/` — 선택 사항인 Python 서버(LLM 분석 사용 시). GitHub Pages에는 쓰이지 않습니다.
 
+## 배포
+
+GitHub Pages는 `gh-pages` 브랜치의 내용을 그대로 올립니다. 파일을 고칠 때는 `main`과 `gh-pages` 두 브랜치를 같은 내용으로 맞춰 주세요(`git push origin main:gh-pages`).
+
 ## 참고
 
 - 실시간 시세는 바이비트 공개 웹소켓(`wss://stream.bybit.com/v5/public/linear`)에서 받습니다.
