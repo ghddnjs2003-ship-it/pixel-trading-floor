@@ -19,7 +19,7 @@
   const TICK_MS = 5000;
   // 업비트 REST는 Origin(사이트 주소) 단위로 1분에 10번 정도만 허용한다 — 모든 방문자가 같은 Origin을 쓰므로
   // 평소에는 웹소켓으로 받고, 웹소켓이 막힌 환경에서만 REST로 드문드문 받는다.
-  const DUE = { json: 5 * 60000, prices: 60000, upbitRest: 5 * 60000, cg: 3 * 60000, fng: 10 * 60000, fx: 30 * 60000 };
+  const DUE = { json: 5 * 60000, prices: 60000, krw: 60000, cg: 3 * 60000, fng: 10 * 60000, fx: 30 * 60000 };
   const STALE_MS = 30 * 60000;
 
   const SPEC = [
@@ -66,10 +66,10 @@
   const state = {
     markets: {},
     cryptoJson: {},
-    live: { btcUsd: null, ethUsd: null, btcKrw: null, fx: null, cg: null, fng: null, fngLabel: null },
+    live: { btcUsd: null, ethUsd: null, btcKrw: null, krwSource: null, fx: null, cg: null, fng: null, fngLabel: null },
     jsonAt: 0,
     liveAt: 0,
-    due: { json: 0, kimchi: 0, cg: 0, fng: 0, fx: 0 },
+    due: { json: 0, prices: 0, krw: 0, cg: 0, fng: 0, fx: 0 },
     ready: false,
     busy: {},
   };
@@ -118,6 +118,7 @@
   // 웹소켓이 막히면 REST로 5분에 한 번만 받는다 — REST는 Origin당 분당 호출 수가 작아 자주 부르면
   // 사이트 전체가 429를 맞는다.
   const upbit = { ws: null, state: 'idle', retry: 0, timer: 0, paintTimer: 0 };
+  const KRW_NAME = { upbit: '업비트', bithumb: '빗썸' };
 
   async function loadPrices() {
     const [btcUsd, ethUsd] = await Promise.allSettled([
@@ -142,8 +143,10 @@
     state.due.prices = Date.now() + DUE.prices;
   }
 
-  function upbitPrice(price) {
+  function krwPrice(price, source) {
+    if (!price) return;
     state.live.btcKrw = price;
+    state.live.krwSource = source;
     state.liveAt = Date.now();
     if (upbit.paintTimer) return;   // 체결이 초당 여러 번 와도 화면은 1초에 한 번만 고친다
     upbit.paintTimer = setTimeout(() => {
@@ -160,7 +163,7 @@
       const row = Array.isArray(data) ? data[0] : data;
       if (row && row.type === 'ticker' && row.code === 'KRW-BTC') {
         const price = num(row.trade_price);
-        if (price) upbitPrice(price);
+        if (price) krwPrice(price, 'upbit');
       }
     } catch (error) {
       // 이상한 메시지는 버린다 — 소켓은 그대로 둔다
@@ -169,7 +172,8 @@
 
   function scheduleUpbitRetry() {
     upbit.retry += 1;
-    const delay = Math.min(60000, 4000 * Math.pow(2, Math.min(4, upbit.retry)));
+    // 업비트도 접속(핸드셰이크)에 제한이 있다 — 실패하면 1분부터 천천히, 최대 10분 간격으로만 다시 붙는다
+    const delay = Math.min(10 * 60000, 60000 * Math.pow(2, Math.min(3, upbit.retry)));
     clearTimeout(upbit.timer);
     upbit.timer = setTimeout(openUpbit, delay);
   }
@@ -213,13 +217,13 @@
     };
   }
 
-  async function loadUpbitRest() {
-    const rows = await getJSON('https://api.upbit.com/v1/ticker?markets=KRW-BTC', 7000);
-    const price = num(rows && rows[0] && rows[0].trade_price);
-    if (price) upbitPrice(price);
-    // 실패하면(429 등) 다음 시도를 두 배로 미룬다 — 최대 30분
-    upbit.retry += 1;
-    state.due.upbitRest = Date.now() + Math.min(30 * 60000, DUE.upbitRest * Math.pow(2, Math.min(3, upbit.retry - 1)));
+  // 업비트 웹소켓이 막힌 환경(회선·일시 차단)을 위한 원화 시세 — 빗썸 공개 시세.
+  // 업비트 REST는 사이트 주소(Origin)당 분당 호출 수가 작아 모두가 나눠 쓰면 금방 429가 난다.
+  async function loadKrwFallback() {
+    const data = await getJSON('https://api.bithumb.com/public/ticker/BTC_KRW', 7000);
+    const price = num(data && data.data && data.data.closing_price);
+    if (price) krwPrice(price, 'bithumb');
+    state.due.krw = Date.now() + DUE.krw;
   }
 
   async function loadFx() {
@@ -331,10 +335,11 @@
       } else if (spec.kind === 'kimchi') {
         row.value = kimchi;
         row.pct = null;
-        row.sub = btcKrw ? '업비트 ' + fmt(btcKrw, 0) : '';
+        const krwName = KRW_NAME[state.live.krwSource] || '업비트';
+        row.sub = btcKrw ? krwName + ' ' + fmt(btcKrw, 0) : '';
         row.side = fx ? '환율 ' + fmt(fx, 2) : '';
         row.title = [
-          btcKrw ? '업비트 ' + fmt(btcKrw, 0) + '원' : '',
+          btcKrw ? krwName + ' ' + fmt(btcKrw, 0) + '원' : '',
           btcUsd ? '달러 ' + fmt(btcUsd, 2) : '',
           fx ? '환율 ' + fmt(fx, 2) : '',
         ].filter(Boolean).join(' · ');
@@ -585,7 +590,7 @@
     const now = Date.now();
     if (force || now >= state.due.json) guard('json', loadJson);
     if (force || now >= state.due.prices) guard('prices', loadPrices);
-    if (upbit.state === 'down' && (force || now >= state.due.upbitRest)) guard('upbit', loadUpbitRest);
+    if (upbit.state !== 'live' && (force || now >= state.due.krw)) guard('krw', loadKrwFallback);
     if (force || now >= state.due.cg) guard('coingecko', loadCoingecko);
     if (force || now >= state.due.fng) guard('fng', loadFng);
     if (now >= state.due.fx) guard('fx', loadFx);
@@ -636,6 +641,7 @@
     guard('json', loadJson);
     guard('prices', loadPrices);
     guard('coingecko', loadCoingecko);
+    state.due.krw = Date.now() + 8000;   // 웹소켓이 8초 안에 못 붙으면 원화 폴백을 부른다
     openUpbit();
     guard('fng', loadFng);
   }
@@ -646,7 +652,7 @@
   window.LiteGlobal = {
     state, rows, paint, refresh: () => tick(true), syncLabel,
     debug: () => ({
-      upbit: upbit.state, retry: upbit.retry,
+      upbit: upbit.state, retry: upbit.retry, krwSource: state.live.krwSource,
       btcKrw: state.live.btcKrw, btcUsd: state.live.btcUsd, ethUsd: state.live.ethUsd, fx: state.live.fx,
       cg: state.live.cg, fng: state.live.fng,
       jsonAt: state.jsonAt, liveAt: state.liveAt, due: state.due,
