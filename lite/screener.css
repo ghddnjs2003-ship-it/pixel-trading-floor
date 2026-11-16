@@ -151,7 +151,9 @@ html.screener-view #screener-page {
   html.screener-view #logo { flex-basis: auto; font-size: 11px; }
   html.screener-view #view-switch { gap: 4px; }
   html.screener-view #view-switch button { min-width: 0; min-height: 34px; padding: 6px 9px; font-size: 11px; }
-  html.screener-view #screener-page { inset: 48px 0 0; }
+  html.screener-view #screener-page { inset: 48px 0 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: contain; }
+  /* 시황 카드를 펼쳐 내용이 길어져도 목록이 두 줄로 눌리지 않게 — 최소 높이를 지키고 넘치면 페이지가 대신 스크롤된다 */
+  #scr-rows { flex: 1 1 auto; min-height: 430px; }
 
   .scr-bar { flex-wrap: wrap; gap: 8px; min-height: 0; padding: 8px; }
   .scr-market { order: 1; }

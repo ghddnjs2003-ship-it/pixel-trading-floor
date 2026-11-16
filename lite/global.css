@@ -152,6 +152,51 @@ html.screener-view #app > #gbar { display: none !important; }
 @media (prefers-reduced-motion: reduce) { .sg-live i { animation: none; } }
 
 .sg-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; }
+
+/* 접기/펼치기 — 좁은 화면에서만 보인다. 넓은 화면은 7칸을 그대로 둔다 */
+.sg-toggle {
+  display: none;
+  align-items: center;
+  flex: none;
+  gap: 5px;
+  padding: 4px 9px;
+  color: #9dabbe;
+  background: #131b27;
+  border: 1px solid #2b3646;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 9px;
+  cursor: pointer;
+}
+.sg-toggle:hover { color: #c9f7e5; border-color: #2a715b; }
+.sg-toggle i {
+  display: block;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: translateY(-2px) rotate(45deg);
+  transition: transform .15s ease;
+}
+.sg-toggle[aria-expanded="true"] i { transform: translateY(1px) rotate(-135deg); }
+.sg-mini { display: none; }
+.sg-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  background: #10151e;
+  border: 1px solid #273143;
+  border-left-width: 2px;
+  border-radius: 4px;
+  font-size: 9px;
+  white-space: nowrap;
+}
+.sg-chip em { color: #7e8a9c; font-style: normal; }
+.sg-chip b { color: #e8eef7; font-weight: 600; font-variant-numeric: tabular-nums; }
+.sg-chip[data-dir="up"] { border-left-color: #27c98b; }
+.sg-chip[data-dir="down"] { border-left-color: #f05b6e; }
+.sg-chip[data-k="fng"] { border-left-color: #eac14c; }
 .sg-card {
   position: relative;
   display: flex;
@@ -254,4 +299,14 @@ html.screener-view #app > #gbar { display: none !important; }
   .sg-spark { width: 58px; height: 20px; }
   .sg-spark-gap, .sg-dom { width: 58px; }
   .sg-foot { height: 20px; }
+
+  /* 모바일: 기본은 접힘 — 한 줄 요약 칩만 두고 코인 목록이 화면을 넓게 쓴다 */
+  .sg-toggle { display: inline-flex; min-height: 26px; padding: 4px 8px; }
+  .sg-mini { display: flex; gap: 5px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+  .sg-mini::-webkit-scrollbar { display: none; }
+  .sg-chip { flex: 0 0 auto; }
+  #scr-global.is-collapsed { padding: 8px 8px 7px; }
+  #scr-global.is-collapsed .sg-grid { display: none; }
+  #scr-global.is-collapsed .sg-head { margin-bottom: 6px; }
+  #scr-global:not(.is-collapsed) .sg-mini { display: none; }
 }

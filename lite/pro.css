@@ -1,0 +1,293 @@
+/* PIXEL TRADING FLOOR — 실전 기능 3종
+   1) 선물 수급 3대장 (#pro-flow)   : 트레이딩 탭 차트 위 서브바 — 펀딩비 · 미결제약정 · 롱/숏 비율
+   2) 손절 기준 수량 계산기 (.pro-risk) : 주문 패널 안 — 손실 한도 · 시드 비율 · 손익비
+   3) 모의 매매 성적표 (#pro-modal)  : 실제 모의 계좌 체결 내역 집계
+   톤은 데모 트레이딩 화면과 같다(#0b0e13 바탕 · #10151e 패널 · #263143 경계 · 초록 #2fd39a · 빨강 #f2687b). */
+
+/* ============ 1. 선물 수급 3대장 ============ */
+#pro-flow {
+  display: flex;
+  align-items: stretch;
+  flex: none;
+  gap: 0;
+  min-height: 54px;
+  padding: 0 16px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  color: #c9d3e1;
+  background: #0d1219;
+  border-bottom: 1px solid #263143;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  scrollbar-width: thin;
+}
+#pro-flow::-webkit-scrollbar { height: 4px; }
+#pro-flow::-webkit-scrollbar-thumb { background: #2b3646; }
+.pf-tag {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 6px;
+  padding-right: 16px;
+  color: #8794a8;
+  font-size: 10px;
+  letter-spacing: .4px;
+  white-space: nowrap;
+}
+.pf-tag b { color: #dbe4f0; font-size: 11px; font-weight: 700; }
+.pf-tag i { width: 6px; height: 6px; border-radius: 50%; background: #3f7bd8; box-shadow: 0 0 7px #3f7bd8; }
+.pf-cell {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  min-width: max-content;
+  padding: 0 18px;
+  border-left: 1px solid #1d2735;
+  white-space: nowrap;
+}
+.pf-lbl { display: flex; align-items: center; gap: 6px; color: #7d8a9d; font-size: 9px; letter-spacing: .3px; }
+.pf-lbl em { padding: 1px 4px; color: #93a2b6; background: #18202c; border: 1px solid #273143; border-radius: 2px; font-size: 8px; font-style: normal; }
+.pf-val { display: flex; align-items: baseline; gap: 7px; color: #e6ecf5; font-size: 15px; font-weight: 700; letter-spacing: .2px; }
+.pf-val.up { color: #2fd39a; }
+.pf-val.down { color: #f2687b; }
+.pf-val small { color: #94a1b3; font-size: 10px; font-weight: 400; }
+.pf-sub { display: flex; align-items: center; gap: 5px; color: #7e8b9e; font-size: 9px; }
+.pf-sub b { color: #cdd8e6; font-weight: 600; }
+.pf-sub .up { color: #2fd39a; }
+.pf-sub .down { color: #f2687b; }
+
+/* 펀딩 정산 카운트다운 — 정산 주기 진행 막대 */
+.pf-clock { display: flex; align-items: center; gap: 6px; }
+.pf-count { color: #e3c069; font-weight: 700; }
+.pf-cycle { position: relative; width: 74px; height: 4px; overflow: hidden; background: #1b2432; border-radius: 2px; }
+.pf-cycle i { position: absolute; inset: 0 auto 0 0; width: 0; background: linear-gradient(90deg, #2b6a56, #3fbf95); }
+.pf-cycle::after { position: absolute; inset: 0; content: ''; background: repeating-linear-gradient(90deg, transparent 0 9px, #0d1219 9px 10px); }
+
+/* OI 스파크라인 */
+.pf-spark { display: block; flex: none; width: 62px; height: 16px; }
+
+/* 롱/숏 비율 게이지 */
+.pf-gauge { display: flex; align-items: center; gap: 7px; }
+.pf-bar { display: flex; width: 100%; min-width: 96px; max-width: 210px; height: 7px; overflow: hidden; background: #1b2432; border-radius: 2px; }
+.pf-bar i { display: block; height: 100%; }
+.pf-bar .long { background: linear-gradient(90deg, #1f9e75, #35d29c); }
+.pf-bar .short { background: linear-gradient(90deg, #e0576b, #a63a4a); }
+.pf-long { color: #35d29c; font-size: 12px; font-weight: 700; }
+.pf-short { color: #f2687b; font-size: 12px; font-weight: 700; }
+.pf-ratio { padding: 1px 5px; color: #b9c6d6; background: #18202c; border: 1px solid #273143; border-radius: 2px; font-size: 9px; }
+.pf-hint { color: #8b98ab; font-size: 9px; }
+.pf-note { display: flex; align-items: center; flex: none; margin-left: auto; padding-left: 14px; color: #6c7a8d; font-size: 9px; white-space: nowrap; }
+.pf-note b { margin-left: 5px; color: #8c9aae; font-weight: 400; }
+.pf-note.is-error b { color: #ee9b78; }
+
+/* ============ 2. 손절 기준 수량 계산기 ============ */
+.trade-ticket.pro-mode { gap: 5px; padding: 9px 12px 8px; }
+.trade-ticket.pro-mode .trade-margin-modes { padding-bottom: 8px; }
+.trade-ticket.pro-mode .trade-risk-fields { gap: 6px; }
+.trade-ticket.pro-mode .trade-order-summary { gap: 5px; padding: 6px 0; }
+.pro-risk { display: flex; flex-direction: column; gap: 7px; }
+.pro-risk .pr-body { display: flex; flex-direction: column; gap: 7px; }
+.pro-risk.pr-manual .pr-body { display: none; }
+.pr-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; color: #b7c3d3; font-size: 10px; }
+.pr-head > b { font-weight: 700; letter-spacing: .3px; }
+.pr-modes { display: flex; gap: 3px; }
+.pr-modes button {
+  padding: 4px 7px; color: #8d9aad; background: #131b27; border: 1px solid #2b3646; border-radius: 3px;
+  cursor: pointer; font: inherit; font-size: 9px;
+}
+.pr-modes button.active { color: #cdeee2; background: #15362d; border-color: #2a715b; }
+.pr-loss { display: flex; align-items: center; gap: 6px; }
+.pr-loss > span { flex: none; color: #96a3b5; font-size: 10px; }
+.pr-loss .pr-input { position: relative; flex: 1; min-width: 0; }
+.pr-loss input {
+  width: 100%; padding: 6px 34px 6px 8px; color: #eef3fa; background: #0c1118;
+  border: 1px solid #3a4a60; border-radius: 3px; font: inherit; font-size: 12px; font-weight: 700;
+}
+.pr-loss .pr-input em { position: absolute; top: 50%; right: 8px; transform: translateY(-50%); color: #7f8c9f; font-size: 9px; font-style: normal; }
+.pr-chips { display: flex; align-items: center; gap: 4px; }
+.pr-chips button {
+  flex: 1; padding: 4px 2px; color: #91a0b3; background: #131b27; border: 1px solid #2b3646;
+  border-radius: 3px; cursor: pointer; font: inherit; font-size: 9px;
+}
+.pr-chips button.active { color: #cdeee2; background: #15362d; border-color: #2a715b; }
+.pr-chips > span { flex: none; margin-left: 3px; color: #6f7d90; font-size: 9px; }
+
+.pr-result {
+  display: grid; gap: 4px; padding: 8px 9px;
+  background: linear-gradient(180deg, #14202c, #101922);
+  border: 1px solid #2b4354; border-left: 3px solid #35b98a; border-radius: 4px;
+}
+.pr-line { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; color: #8593a6; font-size: 10px; }
+.pr-line b { color: #e8eef7; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.pr-big { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding-bottom: 5px; border-bottom: 1px dashed #26384a; }
+.pr-big span { color: #a4b2c4; font-size: 10px; }
+.pr-big b { color: #f2f6fc; font-size: 19px; font-weight: 700; letter-spacing: .3px; font-variant-numeric: tabular-nums; }
+.pr-big b small { margin-left: 3px; color: #93a2b6; font-size: 10px; font-weight: 500; }
+.pr-rr b { color: #e3c069; }
+.pr-rr b.good { color: #2fd39a; }
+.pr-mini { display: flex; align-items: center; justify-content: space-between; gap: 6px; color: #7c8a9d; font-size: 9px; }
+.pr-mini i { font-style: normal; }
+.pr-hint { color: #8fa0b4; font-size: 9px; line-height: 1.35; }
+.pr-hint b { color: #c9a94f; font-weight: 700; }
+.pr-hint.is-warn { color: #ee9b78; }
+.pr-hint.is-warn b { color: #ee9b78; }
+.pro-hide { display: none !important; }
+
+/* ============ 3. 모의 매매 성적표 ============ */
+.pro-stats-btn {
+  flex: none; padding: 7px 11px; color: #cfe8dd; background: #15362d;
+  border: 1px solid #2a715b; border-radius: 4px; cursor: pointer; font: inherit; font-size: 10px;
+}
+.pro-stats-btn:hover { color: #eafff6; background: #1a4237; }
+
+#pro-modal { position: fixed; inset: 0; z-index: 100050; display: flex; align-items: center; justify-content: center; }
+#pro-modal.hidden { display: none; }
+.pm-backdrop { position: absolute; inset: 0; background: rgba(4, 7, 11, .72); backdrop-filter: blur(2px); }
+.pm-panel {
+  position: relative; display: flex; flex-direction: column; gap: 12px;
+  width: min(1160px, calc(100vw - 60px)); max-height: calc(100vh - 60px);
+  padding: 16px 18px 14px; overflow-y: auto; color: #c9d3e1; background: #0e141c;
+  border: 1px solid #2b3949; border-radius: 6px; box-shadow: 0 18px 60px rgba(0, 0, 0, .6);
+  font-family: Arial, 'Segoe UI', sans-serif; font-size: 11px;
+}
+.pm-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.pm-title { display: flex; align-items: baseline; gap: 9px; color: #eef3fa; font-size: 15px; font-weight: 700; }
+.pm-title span { color: #8b98ab; font-size: 10px; font-weight: 400; }
+.pm-acc { padding: 2px 6px; color: #79cbb1; background: #14332c; border: 1px solid #235246; border-radius: 3px; font-size: 9px; }
+.pm-period { display: flex; gap: 4px; margin-left: auto; }
+.pm-period button {
+  padding: 5px 11px; color: #93a0b3; background: #131b27; border: 1px solid #2b3646; border-radius: 3px;
+  cursor: pointer; font: inherit; font-size: 10px;
+}
+.pm-period button.active { color: #eaf2fb; background: #263247; border-color: #5a6b83; }
+.pm-close { padding: 5px 9px; color: #a9b6c7; background: #161f2b; border: 1px solid #2b3646; border-radius: 3px; cursor: pointer; font: inherit; font-size: 11px; }
+
+.pm-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.pm-card { display: flex; flex-direction: column; gap: 5px; padding: 11px 13px; background: #10171f; border: 1px solid #263143; border-radius: 5px; }
+.pm-card-lbl { display: flex; align-items: center; justify-content: space-between; color: #8492a5; font-size: 10px; }
+.pm-card-lbl i { color: #6d7b8e; font-size: 9px; font-style: normal; }
+.pm-card-val { color: #eef3fa; font-size: 22px; font-weight: 700; letter-spacing: .2px; font-variant-numeric: tabular-nums; }
+.pm-card-val.up { color: #2fd39a; }
+.pm-card-val.down { color: #f2687b; }
+.pm-card-val small { margin-left: 6px; color: #8fa3b6; font-size: 11px; font-weight: 500; }
+.pm-card-sub { display: flex; align-items: center; gap: 6px; color: #78879a; font-size: 9px; }
+.pm-card-sub b { color: #b9c6d6; font-weight: 600; }
+.pm-mini-bar { display: flex; height: 4px; overflow: hidden; background: #1a2330; border-radius: 2px; }
+.pm-mini-bar .pm-bar-w { background: #2fbf90; }
+.pm-mini-bar .pm-bar-l { background: #a8424f; }
+
+.pm-curve { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px 6px; background: #10171f; border: 1px solid #263143; border-radius: 5px; }
+.pm-curve-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.pm-curve-head b { color: #dfe8f3; font-size: 11px; }
+.pm-curve-head span { color: #7f8d9f; font-size: 9px; }
+.pm-legend { display: flex; align-items: center; gap: 12px; margin-left: auto; color: #8c9aad; font-size: 9px; }
+.pm-legend i { display: inline-block; width: 14px; height: 2px; margin-right: 5px; vertical-align: middle; }
+.pm-legend .pm-lg-eq i { background: #35d29c; }
+.pm-legend .pm-lg-base i { background: #46566a; }
+.pm-canvas-wrap { position: relative; }
+#pm-canvas { display: block; width: 100%; height: 210px; }
+.pm-empty-curve {
+  position: absolute; inset: 0; display: grid; place-items: center; color: #7f8d9f;
+  font-size: 10px; line-height: 1.6; text-align: center;
+}
+.pm-empty-curve.hidden { display: none; }
+
+.pm-trades { display: flex; flex-direction: column; gap: 5px; min-height: 0; overflow-x: auto; }
+.pm-trades-head { display: flex; align-items: center; gap: 10px; color: #dfe8f3; font-size: 11px; font-weight: 700; }
+.pm-trades-head span { color: #7f8d9f; font-size: 9px; font-weight: 400; }
+.pm-trades-head em { margin-left: auto; color: #8fa0b4; font-size: 9px; font-style: normal; }
+.pm-table { width: 100%; border-collapse: collapse; font-size: 10px; font-variant-numeric: tabular-nums; }
+.pm-table th, .pm-table td { padding: 7px 8px; text-align: right; border-bottom: 1px solid #1d2734; white-space: nowrap; }
+.pm-table th { color: #7b8899; background: #121a24; font-weight: 400; text-align: right; }
+.pm-table th:first-child, .pm-table td:first-child { text-align: left; }
+.pm-table th:nth-child(2), .pm-table td:nth-child(2) { text-align: left; }
+.pm-table td.reason { max-width: 300px; overflow: hidden; color: #8b98ab; text-align: left; text-overflow: ellipsis; }
+.pm-table .up { color: #2fd39a; }
+.pm-table .down { color: #f2687b; }
+.pm-table tr:hover td { background: #131c26; }
+.pm-table .pm-empty-row td { padding: 26px 10px; color: #8492a5; text-align: center; white-space: normal; line-height: 1.7; }
+.pm-side { padding: 1px 5px; border-radius: 2px; font-size: 9px; }
+.pm-side.long { color: #7fe3bd; background: #133029; }
+.pm-side.short { color: #f8a3b0; background: #341a20; }
+.pm-res { padding: 1px 5px; border-radius: 2px; font-size: 9px; }
+.pm-res.tp { color: #7fe3bd; background: #133029; }
+.pm-res.sl { color: #f8a3b0; background: #341a20; }
+.pm-res.mid { color: #e3c069; background: #33290f; }
+.pm-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; color: #6f7d90; font-size: 9px; }
+.pm-foot b { color: #97a5b8; font-weight: 500; }
+.pm-foot .pm-warn { color: #8fa0b4; }
+
+/* 좁은 화면 */
+@media (max-width: 1100px) {
+  .pf-note { display: none; }
+  .pm-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 820px) {
+  /* 수급 바 — 3칸 그리드로 접는다 (가로 스크롤 없이 한눈에) */
+  #pro-flow {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0;
+    min-height: 0;
+    padding: 6px 8px 7px;
+    overflow: visible;
+  }
+  .pf-tag { grid-column: 1 / -1; padding: 0 0 4px; font-size: 9px; }
+  .pf-tag i { width: 5px; height: 5px; }
+  .pf-cell { min-width: 0; gap: 2px; padding: 0 7px; overflow: hidden; }
+  .pf-cell:first-of-type { padding-left: 0; border-left: 0; }
+  .pf-lbl { font-size: 8px; }
+  .pf-lbl em { display: none; }
+  .pf-val { gap: 4px; font-size: 12.5px; }
+  .pf-val small { display: none; }
+  .pf-sub { gap: 3px; font-size: 8px; }
+  .pf-spark { display: none; }
+  .pf-cycle { width: 34px; height: 3px; }
+  .pf-gauge { flex-wrap: wrap; gap: 2px 4px; }
+  .pf-bar { order: 3; flex: 1 1 100%; width: 100%; min-width: 0; height: 5px; }
+  .pf-long, .pf-short { flex: 1 1 40%; font-size: 10px; }
+  .pf-ratio, .pf-hint { display: none; }
+
+  /* 주문 패널 2열 그리드에서 수량 계산기는 폭 전체를 쓴다 */
+  .pro-risk { grid-column: 1 / -1; }
+  .pr-modes button { min-height: 34px; padding: 5px 9px; font-size: 10px; }
+  .pr-chips button { min-height: 34px; font-size: 10px; }
+  .pr-loss input { min-height: 40px; font-size: 14px; }
+  .pr-big b { font-size: 18px; }
+
+  /* 성적표 모달 — 한 화면에 들어오게 */
+  .pm-panel { width: calc(100vw - 16px); max-height: calc(100vh - 16px); gap: 8px; padding: 11px 12px 10px; }
+  .pm-head { gap: 6px 8px; }
+  .pm-title { flex: 1 1 auto; gap: 6px; font-size: 13px; }
+  .pm-title span { font-size: 8px; }
+  .pm-acc { padding: 1px 4px; font-size: 8px; }
+  .pm-period { order: 2; width: 100%; margin-left: 0; }
+  .pm-period button { flex: 1; padding: 4px 2px; font-size: 9px; }
+  .pm-close { padding: 4px 7px; font-size: 10px; }
+  .pm-cards { gap: 6px; }
+  .pm-card { gap: 3px; padding: 8px 9px; }
+  .pm-card-lbl { font-size: 9px; }
+  .pm-card-val { font-size: 16px; }
+  .pm-card-val small { margin-left: 4px; font-size: 9px; }
+  .pm-card-sub { font-size: 8px; }
+  .pm-curve { padding: 8px 9px 4px; }
+  .pm-curve-head { gap: 4px 8px; }
+  .pm-curve-head b { font-size: 10px; }
+  .pm-curve-head span { font-size: 8px; }
+  .pm-legend { gap: 8px; margin-left: 0; font-size: 8px; }
+  #pm-canvas { height: 150px; }
+  .pm-trades-head { gap: 6px; font-size: 10px; }
+  .pm-trades-head em { display: none; }
+  .pm-table { min-width: 520px; font-size: 9px; }
+  .pm-table.is-empty { min-width: 0; }
+  .pm-table.is-empty thead { display: none; }
+  .pm-table.is-empty .pm-empty-row td { padding: 22px 8px; }
+  .pm-table th, .pm-table td { padding: 6px 4px; }
+  .pm-table th:nth-child(5), .pm-table td:nth-child(5),
+  .pm-table th:nth-child(7), .pm-table td:nth-child(7),
+  .pm-table th:nth-child(8), .pm-table td:nth-child(8) { display: none; }
+  .pm-foot { gap: 5px 10px; font-size: 8px; }
+}

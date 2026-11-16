@@ -32,6 +32,10 @@
     { key: 'fng', short: 'F&G', label: '공포·탐욕', tag: 'F&G', digits: 0, kind: 'fng' },
   ];
 
+  // 좁은 화면(≤820px)에서 7칸 카드를 다 펼치면 코인 목록이 두 줄만 남는다 — 접어 둔 상태를 기억한다
+  const CARDS_KEY = 'pixel-global-cards-open-v1';
+  const CARDS_MINI = ['kimchi', 'btcd', 'fng', 'nq'];
+
   // CoinGecko가 호출 제한을 내면 한동안 아예 시도하지 않는다(콘솔·요청 소음 방지) — 그동안은 Coinlore가 값를 낸다
   const CG_PAUSE_KEY = 'pixel-global-cg-pause-v1';
   const CG_PAUSE_MS = 30 * 60000;
@@ -460,7 +464,13 @@
       + '<span class="sg-title">◆ 글로벌 시황 ◆</span>'
       + '<span class="sg-note">미 선물 · 달러 · 온체인</span>'
       + '<span class="sg-live"><i></i><em class="sg-live-time">LIVE · --:-- KST</em></span>'
-      + '</div><div class="sg-grid">'
+      + '<button type="button" class="sg-toggle" aria-expanded="true" aria-controls="scr-global-grid" title="글로벌 시황 카드 접기">'
+      + '<span class="sg-toggle-lbl">접기</span><i aria-hidden="true"></i></button>'
+      + '</div>'
+      + '<div class="sg-mini">' + CARDS_MINI.map((key) => {
+        const spec = SPEC.find((item) => item.key === key);
+        return `<span class="sg-chip" data-k="${key}" data-dir="flat"><em>${spec ? spec.short : key}</em><b>—</b></span>`;
+      }).join('') + '</div><div class="sg-grid" id="scr-global-grid">'
       + SPEC.map((spec) => `<article class="sg-card" data-k="${spec.key}" data-dir="flat">`
         + `<div class="sg-top"><span class="sg-lbl">${spec.label}</span><span class="sg-tag">${spec.tag}</span></div>`
         + '<b class="sg-val">—</b>'
@@ -470,6 +480,51 @@
       + '</div>';
     const bar = page.querySelector('.scr-bar');
     page.insertBefore(box, bar ? bar.nextSibling : page.firstChild);
+
+    const toggle = box.querySelector('.sg-toggle');
+    if (toggle) {
+      toggle.addEventListener('click', () => applyCardsOpen(box.classList.contains('is-collapsed'), true));
+    }
+    try {
+      const mq = window.matchMedia('(max-width: 820px)');
+      const onChange = () => applyCardsOpen(storedCardsOpen());
+      if (mq.addEventListener) mq.addEventListener('change', onChange);
+      else if (mq.addListener) mq.addListener(onChange);
+    } catch (e) { /* 미디어쿼리를 못 써도 토글로 연다 */ }
+    applyCardsOpen(storedCardsOpen());
+  }
+
+  function isNarrow() {
+    try { return window.matchMedia('(max-width: 820px)').matches; } catch (e) { return false; }
+  }
+
+  function storedCardsOpen() {
+    try {
+      const raw = localStorage.getItem(CARDS_KEY);
+      return raw === null ? null : raw === '1';
+    } catch (e) { return null; }
+  }
+
+  // 펼침/접힘 — 좁은 화면에서만 접힌다. 넓은 화면은 7칸을 그대로 두고 토글도 숨긴다.
+  function applyCardsOpen(open, persist) {
+    const box = $('#scr-global');
+    if (!box) return;
+    const stored = storedCardsOpen();
+    const wantOpen = open == null ? (stored == null ? !isNarrow() : stored) : !!open;
+    const collapsed = !wantOpen && isNarrow();
+    box.classList.toggle('is-collapsed', collapsed);
+    const toggle = box.querySelector('.sg-toggle');
+    if (toggle) {
+      toggle.setAttribute('aria-expanded', String(!collapsed));
+      toggle.title = collapsed ? '글로벌 시황 카드 펼치기' : '글로벌 시황 카드 접기';
+      const label = toggle.querySelector('.sg-toggle-lbl');
+      if (label) label.textContent = collapsed ? '카드 펼치기' : '접기';
+    }
+    if (persist) {
+      try { localStorage.setItem(CARDS_KEY, wantOpen ? '1' : '0'); } catch (e) { /* 저장 못 해도 동작 */ }
+    }
+    // 접힌 동안(폭 0) 그린 스파크라인은 다시 그려야 보인다
+    if (!collapsed) paint();
   }
 
   function cardValueHtml(row) {
@@ -531,6 +586,26 @@
     if (live) live.textContent = 'LIVE · ' + syncLabel(true).replace('SYNC ', '');
     const pill = box.querySelector('.sg-live');
     if (pill) pill.classList.toggle('stale', isStale());
+
+    // 접힌 상태의 한 줄 요약 칩 — 같은 값을 카드 대신 칩으로 보여 준다
+    const byKey = new Map(list.map((row) => [row.key, row]));
+    box.querySelectorAll('.sg-chip').forEach((chip) => {
+      const row = byKey.get(chip.dataset.k);
+      const value = chip.querySelector('b');
+      if (!row || !value) return;
+      chip.dataset.dir = row.kind === 'fng' ? 'flat' : (row.pct != null ? dirOf(row.pct) : (row.dir || 'flat'));
+      value.textContent = chipValue(row);
+      chip.title = row.label + ' ' + chipValue(row);
+    });
+  }
+
+  function chipValue(row) {
+    if (row.value == null) return '—';
+    if (row.kind === 'kimchi') return `${row.value > 0 ? '+' : ''}${fmt(row.value, 2)}%`;
+    if (row.kind === 'fng') return `${Math.round(row.value)}${row.label2 ? ' ' + row.label2 : ''}`;
+    if (row.unit === '%') return `${fmt(row.value, 2)}%`;
+    if (row.unit === '원') return `${fmt(row.value, 0)}원`;
+    return fmt(row.value, row.digits);
   }
 
   // 24시간 흐름 미니 스파크 — global.json에 담긴 실제 5분봉 종가를 계단식으로
