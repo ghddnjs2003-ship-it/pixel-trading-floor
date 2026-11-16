@@ -1,5 +1,5 @@
 {
- "updatedAt": "2026-11-17T01:32:22+09:00",
+ "updatedAt": "2026-11-17T07:49:13+09:00",
  "source": "ForexFactory weekly calendar",
  "sourceUrl": "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
  "timezone": "Asia/Seoul",
@@ -39,7 +39,7 @@
    "impactStars": 3,
    "title": "소매판매 (전월대비)",
    "titleEn": "Retail Sales m/m",
-   "forecast": "0.2%",
+   "forecast": "0.1%",
    "previous": "0.8%"
   },
   {
