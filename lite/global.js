@@ -315,8 +315,13 @@
     const fx = fxEntry.price != null ? fxEntry.price : (num(c.usdKrw) != null ? num(c.usdKrw) : num(L.fx));
     const btcUsd = num(L.btcUsd) != null ? num(L.btcUsd) : num(c.btcUsd);
     const ethUsd = num(L.ethUsd) != null ? num(L.ethUsd) : num(c.ethUsd);
-    const btcKrw = num(L.btcKrw) != null ? num(L.btcKrw) : num(c.btcKrw);
-    const kimchi = fx && btcUsd && btcKrw ? (btcKrw / (btcUsd * fx) - 1) * 100 : num(c.kimchiPct);
+    // 김프는 같은 시점의 세 값으로만 계산한다 — 실시간 원화가 없으면 global.json이 함께 받아 둔
+    // 김프 값을 그대로 쓴다(신선한 달러에 낡은 원화를 섞으면 값이 튄다)
+    const krwLive = num(L.btcKrw);
+    const btcKrw = krwLive != null ? krwLive : num(c.btcKrw);
+    const kimchi = krwLive != null && fx && btcUsd
+      ? (krwLive / (btcUsd * fx) - 1) * 100
+      : num(c.kimchiPct);
 
     const cg = L.cg || {};
     const btcDom = num(cg.btc) != null ? num(cg.btc) : num(c.btcDominance);
