@@ -433,12 +433,12 @@
   function flash(el, up) {
     if (reduceMotion || !el || typeof el.animate !== 'function') return;
     const at = performance.now();
-    if (el.flashAt && at - el.flashAt < 700) return; // 초당 수십 번 오는 값을 다 번쩍이지 않게
+    if (el.flashAt && at - el.flashAt < 900) return; // 초당 수십 번 오는 값을 다 번쩍이지 않게
     el.flashAt = at;
     const tone = up ? '39, 201, 139' : '240, 91, 110';
     try {
-      el.animate([{ backgroundColor: `rgba(${tone}, .15)` }, { backgroundColor: `rgba(${tone}, 0)` }], { duration: 560, easing: 'ease-out' });
-      el.priceEl.animate([{ color: up ? '#63e6b6' : '#ff9aa5' }, { color: '#e8eef7' }], { duration: 560, easing: 'ease-out' });
+      el.animate([{ backgroundColor: `rgba(${tone}, .1)` }, { backgroundColor: `rgba(${tone}, 0)` }], { duration: 480, easing: 'ease-out' });
+      el.priceEl.animate([{ color: up ? '#63e6b6' : '#ff9aa5' }, { color: '#e8eef7' }], { duration: 480, easing: 'ease-out' });
     } catch (error) {
       /* Web Animations를 지원하지 않는 브라우저 — 숫자만 갱신한다 */
     }
