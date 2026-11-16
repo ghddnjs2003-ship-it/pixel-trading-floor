@@ -1,0 +1,50 @@
+name: 글로벌 시황 갱신
+
+# 미 선물(NQ·ES)·달러 인덱스·원/달러·김프·도미넌스·공포탐욕을 10분마다 받아
+# data/global.json에, 이번 주 미국 경제 일정을 data/calendar.json에 저장하고 main·gh-pages에 올린다. 브라우저가 야후 파이낸스에
+# 직접 붙을 수 없어(CORS 헤더 없음) 같은 출처의 JSON으로 건네주는 우회로다.
+# 웹 쪽 실시간 값(김프·도미넌스·F&G)은 페이지가 직접 공개 API에서 받으므로,
+# 이 파일은 '1차 소스 + 실패 시 폴백' 역할을 한다.
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'   # 10분마다 (UTC 기준, 러너 대기로 몇 분 늦을 수 있음)
+  workflow_dispatch:          # 손으로 한 번 돌려 보기
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-global
+  cancel-in-progress: true
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 저장소 받기
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 스냅숏 만들기
+        run: python3 scripts/update-global.py
+
+      - name: 바뀐 값 커밋하고 main·gh-pages에 올리기
+        run: |
+          set -e
+          if git diff --quiet -- data/global.json data/calendar.json; then
+            echo "값이 그대로입니다 — 커밋하지 않습니다"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/global.json data/calendar.json
+          git commit -m "chore(global): 글로벌 시황 스냅숏 $(date -u +'%Y-%m-%dT%H:%MZ')"
+          git push origin HEAD:main
+          git fetch origin gh-pages
+          if git merge-base --is-ancestor origin/gh-pages HEAD; then
+            git push origin HEAD:gh-pages
+          else
+            echo "::warning::gh-pages가 main과 갈라져 있어 이번 갱신은 main에만 올렸습니다"
+          fi
