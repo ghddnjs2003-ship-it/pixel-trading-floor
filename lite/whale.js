@@ -26,6 +26,7 @@
 
   const GRID = 'https://api.trongrid.io/v1/contracts/TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t/events';
   const SCAN = 'https://apilist.tronscanapi.com/api/token_trc20/transfers';
+  const SCAN_ALT = 'https://apilist.tronscan.org/api/token_trc20/transfers';   // 같은 API의 다른 문 — 한쪽이 막히면 다른 쪽
   const CONTRACT = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';   // Tether USD (TRC20)
   const EXPLORER = 'https://tronscan.org/#/transaction/';
   const CAL_URL = 'data/calendar.json';
@@ -109,8 +110,8 @@
 
   function usdText(v) {
     if (!Number.isFinite(v)) return '—';
-    if (v >= 1e9) return `$${(v / 1e9).toFixed(2)}B`;
-    if (v >= 1e6) return `$${(v / 1e6).toFixed(2)}M`;
+    if (v >= 995e6) return `$${(v / 1e9).toFixed(2)}B`;
+    if (v >= 995e3) return `$${(v / 1e6).toFixed(2)}M`;   // 999,999를 $1000K로 쓰지 않게
     if (v >= 1e3) return `$${Math.round(v / 1e3)}K`;
     return `$${Math.round(v)}`;
   }
@@ -502,19 +503,32 @@
     const now = Date.now();
     if (now < state.tagAt) return 0;
     try {
-      const url = `${SCAN}?limit=50&start=0&sort=-timestamp&count=false&contract_address=${CONTRACT}`;
-      const res = await fetch(url, { cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer' });
-      if (!res.ok) throw new Error(`TronScan HTTP ${res.status}`);
-      const json = await res.json();
-      const list = (json && json.token_transfers) || [];
+      const list = await scanList(SCAN);
       const added = ingestScan(list);
       state.tagAt = Date.now() + TAG_MS;
       if (state.tags.size) saveTags();
       return added;
     } catch (err) {
-      state.tagAt = Date.now() + TAG_COOL_MS;   // 호출 제한이면 조용히 물러난다
-      return 0;
+      // 다른 주소로 한 번 더 — 그래도 안 되면 4분 쉰다
+      try {
+        const list = await scanList(SCAN_ALT);
+        const added = ingestScan(list);
+        state.tagAt = Date.now() + TAG_MS;
+        if (state.tags.size) saveTags();
+        return added;
+      } catch (err2) {
+        state.tagAt = Date.now() + TAG_COOL_MS;   // 호출 제한이면 조용히 물러난다
+        return 0;
+      }
     }
+  }
+
+  async function scanList(url) {
+    const full = `${url}?limit=50&start=0&sort=-timestamp&count=false&contract_address=${CONTRACT}`;
+    const res = await fetch(full, { cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer' });
+    if (!res.ok) throw new Error(`TronScan HTTP ${res.status}`);
+    const json = await res.json();
+    return (json && json.token_transfers) || [];
   }
 
   function trim() {
