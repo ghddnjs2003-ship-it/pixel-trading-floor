@@ -47,7 +47,7 @@
   const nav = document.createElement('nav');
   nav.id = 'view-switch';
   nav.setAttribute('aria-label', '화면 전환');
-  nav.innerHTML = '<button type="button" data-view="office" class="active">사무실</button><button type="button" data-view="screener">스크리너</button><button type="button" data-view="trading" disabled aria-disabled="true" title="실전 연동 예정">트레이딩</button>';
+  nav.innerHTML = '<button type="button" data-view="office" class="active">사무실</button><button type="button" data-view="screener">스크리너</button><button type="button" data-view="whale" title="실시간 고래 입출금 · 이번 주 경제 일정">고래·일정</button><button type="button" data-view="trading" disabled aria-disabled="true" title="실전 연동 예정">트레이딩</button>';
   topbar.insertBefore(nav, $('#controls'));
   nav.addEventListener('click', (event) => {
     const button = event.target.closest('[data-view]');
@@ -256,11 +256,14 @@
   }, { passive: false });
 
   function setView(view) {
-    state.view = view === 'trading' ? 'trading' : view === 'screener' ? 'screener' : 'office';
+    state.view = view === 'trading' ? 'trading' : view === 'screener' ? 'screener' : view === 'whale' ? 'whale' : 'office';
     document.documentElement.classList.toggle('trading-view', state.view === 'trading');
     document.documentElement.classList.toggle('screener-view', state.view === 'screener');
+    document.documentElement.classList.toggle('whale-view', state.view === 'whale');
     // 스크리너는 자기 탭이 보일 때만 Bybit 시세를 갱신한다 (사무실·트레이딩에서는 요청하지 않음)
     if (window.LiteScreener && typeof window.LiteScreener.setActive === 'function') window.LiteScreener.setActive(state.view === 'screener');
+    // 고래·일정도 그 화면이 보이는 동안에만 TronScan을 부른다
+    if (window.LiteWhale && typeof window.LiteWhale.setActive === 'function') window.LiteWhale.setActive(state.view === 'whale');
     $$('#view-switch [data-view]').forEach((button) => button.classList.toggle('active', button.dataset.view === state.view));
     if (state.view === 'trading') {
       if (LITE.live && LITE.live.feed) LITE.live.feed.want([]);
@@ -969,5 +972,5 @@
     setView('trading');
   }
 
-  window.LiteTrading = { show: () => setView('trading'), showSymbol, office: () => setView('office'), screener: () => setView('screener'), loadMarket, renderPositions, setDecision };
+  window.LiteTrading = { show: () => setView('trading'), showSymbol, office: () => setView('office'), screener: () => setView('screener'), whale: () => setView('whale'), loadMarket, renderPositions, setDecision };
 })();

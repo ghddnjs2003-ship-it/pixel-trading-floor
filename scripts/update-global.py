@@ -7,8 +7,9 @@
 공개 API에서 실시간으로 받고, 실패했을 때만 이 파일의 값으로 물러난다.
 
 사용법:
-    python3 scripts/update-global.py            # data/global.json 갱신
+    python3 scripts/update-global.py            # data/global.json + data/calendar.json 갱신
     python3 scripts/update-global.py --print    # 파일을 쓰지 않고 결과만 출력
+    python3 scripts/update-global.py --calendar # 이번 주 경제 일정(data/calendar.json)만 갱신
 
 출처
     · NQ=F / ES=F / DX-Y.NYB / KRW=X — 야후 파이낸스 차트 API(1일·5분봉) → 24시간 스파크라인
@@ -18,6 +19,9 @@
     · 원/달러 — open.er-api.com 무료 환율
     · BTC 도미넌스·ETH·총시총 — CoinGecko /api/v3/global
     · 공포탐욕 — alternative.me/fng
+    · 이번 주 미국 주요 경제 일정 — ForexFactory 주간 캘린더(nfs.faireconomy.media)
+      High·Medium만 골라 한국 시간(KST)으로 바꾸고 지표명을 한국어로 옮겨 data/calendar.json에 담는다.
+      (사이트가 CORS를 열지 않아 브라우저가 직접 못 받는다 — global.json과 같은 우회로를 쓴다)
 
 이 파일은 투자 조언이 아닙니다. 값은 각 거래소·지수 제공처의 지연 시세입니다.
 """
@@ -34,9 +38,12 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
+import re as _re
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, 'data', 'global.json')
+CAL_OUT = os.path.join(ROOT, 'data', 'calendar.json')
 KST = timezone(timedelta(hours=9))
+FF_URL = 'https://nfs.faireconomy.media/ff_calendar_thisweek.json'
 UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
       '(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36')
 
@@ -169,8 +176,6 @@ def load_previous():
             return json.load(fh)
     except Exception:  # noqa: BLE001 — 첫 실행이면 이전 값이 없는 게 정상
         return {}
-
-
 def build():
     now = datetime.now(KST)
     prev = load_previous()
@@ -286,10 +291,211 @@ def build():
     }
 
 
+# ============================================================ 이번 주 경제 일정
+
+# 지표 이름을 한국어로 — 정확히 모르는 이름은 억지로 번역하지 않고 영어 원문을 남긴다
+KO_NAMES = {
+    'Warsh': '워시', 'Powell': '파월', 'Williams': '윌리엄스', 'Jefferson': '제퍼슨',
+    'Bostic': '보스틱', 'Barr': '바', 'Cook': '쿡', 'Waller': '월러', 'Kashkari': '카시카리',
+    'Musalem': '머살렘', 'Goolsbee': '굴스비', 'Daly': '데일리', 'Logan': '로건', 'Macklem': '맥클렘',
+}
+
+KO_RULES = [
+    (r'^Fed (?:Chairman|Chair) (\w+) Speaks$', r'연준 의장 \1 연설'),
+    (r'^Fed (?:Chairman|Chair) (\w+) Testifies$', r'연준 의장 \1 의회 증언'),
+    (r'^FOMC Member (\w+) Speaks$', r'FOMC 위원 \1 연설'),
+    (r'^FOMC Meeting Minutes$', 'FOMC 의사록'),
+    (r'^FOMC Statement$', 'FOMC 성명서'),
+    (r'^Federal Funds Rate$', '미 기준금리'),
+    (r'^ADP Non-Farm Employment Change$', 'ADP 비농업 고용자수'),
+    (r'^Non-Farm Employment Change$', '비농업 고용자수'),
+    (r'^(?:Core )?Retail Sales$', None),            # 아래 일반 치환에서 처리
+    (r'^(?:Prelim |Revised |Final )?UoM Consumer Sentiment$', None),
+    (r'^(?:Prelim |Revised |Final )?UoM Inflation Expectations$', None),
+    (r'^Philly Fed Manufacturing Index$', '필라델피아 연은 제조업지수'),
+    (r'^Empire State Manufacturing Index$', '뉴욕 연은 제조업지수'),
+    (r'^Richmond Manufacturing Index$', '리치먼드 연은 제조업지수'),
+    (r'^Unemployment Claims$', '신규 실업수당 청구건수'),
+    (r'^Unemployment Rate$', '실업률'),
+    (r'^Average Hourly Earnings$', '평균 시간당 임금'),
+    (r'^Average Weekly Hours$', '주당 평균 노동시간'),
+    (r'^(?:Core )?PCE Price Index$', None),
+    (r'^(?:Core )?CPI$', None),
+    (r'^(?:Core )?PPI$', None),
+    (r'^ISM Manufacturing PMI$', 'ISM 제조업 PMI'),
+    (r'^ISM Services PMI$', 'ISM 서비스업 PMI'),
+    (r'^ISM Manufacturing Prices$', 'ISM 제조업 물가지수'),
+    (r'^JOLTS Job Openings$', 'JOLTS 구인건수'),
+    (r'^CB Consumer Confidence$', 'CB 소비자신뢰지수'),
+    (r'^Existing Home Sales$', '기존주택 판매'),
+    (r'^New Home Sales$', '신규주택 판매'),
+    (r'^Pending Home Sales$', '잠정주택 판매지수'),
+    (r'^Building Permits$', '건축 허가건수'),
+    (r'^Housing Starts$', '주택 착공건수'),
+    (r'^Durable Goods Orders$', '내구재 주문'),
+    (r'^Core Durable Goods Orders$', '근원 내구재 주문'),
+    (r'^Trade Balance$', '무역수지'),
+    (r'^Current Account$', '경상수지'),
+    (r'^Crude Oil Inventories$', '원유 재고'),
+    (r'^Natural Gas Storage$', '천연가스 재고'),
+    (r'^GDP$', '국내총생산(GDP)'),
+    (r'^Treasury Sec (\w+) Speaks$', r'재무장관 \1 연설'),
+    (r'^Speaks$', '연설'),
+    (r'^Services PMI$', '서비스업 PMI'),
+    (r'^Manufacturing PMI$', '제조업 PMI'),
+    (r'^Bank Holiday$', '휴장일'),
+]
+
+KO_WORDS = [
+    ('Core Retail Sales', '근원 소매판매'),
+    ('Retail Sales', '소매판매'),
+    ('UoM Consumer Sentiment', '미시간대 소비자심리지수'),
+    ('UoM Inflation Expectations', '미시간대 기대인플레이션'),
+    ('Core PCE Price Index', '근원 PCE 물가'),
+    ('PCE Price Index', 'PCE 물가'),
+    ('Core CPI', '근원 소비자물가'),
+    ('CPI', '소비자물가'),
+    ('Core PPI', '근원 생산자물가'),
+    ('PPI', '생산자물가'),
+    ('m/m', '(전월대비)'),
+    ('q/q', '(전분기대비)'),
+    ('y/y', '(전년대비)'),
+]
+
+KO_LEFTOVER = _re.compile(r'[A-Za-z]{3,}')
+
+
+def ko_title(en):
+    """미국 지표 이름 → 한국어. 확신이 없는 이름은 영어 원문을 그대로 둔다."""
+    title = en.strip()
+    for pattern, repl in KO_RULES:
+        match = _re.match(pattern, title)
+        if not match:
+            continue
+        if repl is None:
+            break                      # 일반 치환 규칙에 맡긴다
+        out = match.expand(repl)
+        for name_en, name_ko in KO_NAMES.items():
+            out = out.replace(name_en, name_ko)
+        return out
+    out = title
+    head = ''
+    for word, ko in (('Prelim', '예비'), ('Revised', '수정'), ('Final', '확정'), ('Flash', '속보')):
+        if out.startswith(word + ' '):
+            out = out[len(word) + 1:]
+            head = f' ({ko})'
+            break
+    for word, ko in KO_WORDS:
+        out = out.replace(word, ko)
+    out = ' '.join(out.split()) + head
+    leftover = [tok for tok in KO_LEFTOVER.findall(out) if tok not in KO_NAMES]
+    if leftover:
+        return title                     # 반쯤 번역된 이름보다 원문이 낫다
+    return out
+
+
+def build_calendar(source=None):
+    """ForexFactory 주간 캘린더 → 이번 주 미국 High·Medium 일정(KST·한국어).
+
+    source: 이미 받아 둔 JSON 파일 경로(선택). 없으면 사이트에서 직접 받는다.
+    ForexFactory는 IP당 호출 수를 묶어 두어(429) 자주 부르면 잠시 거절된다.
+    """
+    if source:
+        with open(source, encoding='utf-8') as fh:
+            rows = json.load(fh)
+    else:
+        rows = fetch(FF_URL)
+    if not isinstance(rows, list):
+        raise ValueError('calendar: unexpected response')
+
+    events = []
+    week_dates = []
+    for row in rows:
+        raw_date = row.get('date')
+        if not raw_date:
+            continue
+        try:
+            dt = datetime.fromisoformat(raw_date)
+        except ValueError:
+            continue
+        et_date = dt.date()
+        if dt.utcoffset() is not None:
+            et_date = dt.astimezone(timezone(timedelta(hours=-5))).date()
+        week_dates.append(et_date)
+        if str(row.get('country', '')).upper() != 'USD':
+            continue
+        impact = str(row.get('impact', '')).lower()
+        if impact not in ('high', 'medium'):
+            continue
+        kst_dt = dt.astimezone(KST)
+        events.append({
+            'at': kst_dt.isoformat(timespec='seconds'),
+            'atMs': int(kst_dt.timestamp() * 1000),
+            'date': kst_dt.strftime('%Y-%m-%d'),
+            'time': kst_dt.strftime('%H:%M'),
+            'impact': impact,
+            'impactStars': 3 if impact == 'high' else 2,
+            'title': ko_title(str(row.get('title', ''))),
+            'titleEn': str(row.get('title', '')),
+            'forecast': str(row.get('forecast') or ''),
+            'previous': str(row.get('previous') or ''),
+        })
+
+    events.sort(key=lambda e: e['atMs'])
+    week_start = min(week_dates).isoformat() if week_dates else datetime.now(KST).date().isoformat()
+    week_end = (datetime.fromisoformat(week_start).date() + timedelta(days=6)).isoformat()
+    now = datetime.now(KST)
+    return {
+        'updatedAt': now.isoformat(timespec='seconds'),
+        'source': 'ForexFactory weekly calendar',
+        'sourceUrl': FF_URL,
+        'timezone': 'Asia/Seoul',
+        'weekStart': week_start,
+        'weekEnd': week_end,
+        'events': events,
+        'note': '미국 주요 지표 · 한국 시간(KST) · 예상/이전은 발표 전 전망치 · 투자 조언이 아님',
+    }
+
+
+def save_calendar(payload):
+    """일정이 그대로면 파일을 건드리지 않는다 — 10분마다 커밋 소음이 쌓이지 않게."""
+    os.makedirs(os.path.dirname(CAL_OUT), exist_ok=True)
+    old = None
+    if os.path.exists(CAL_OUT):
+        try:
+            with open(CAL_OUT, encoding='utf-8') as fh:
+                old = json.load(fh)
+        except Exception:  # noqa: BLE001
+            old = None
+    if old and old.get('weekStart') == payload.get('weekStart') \
+            and json.dumps(old.get('events'), sort_keys=True, ensure_ascii=False) \
+            == json.dumps(payload.get('events'), sort_keys=True, ensure_ascii=False):
+        return False
+    with open(CAL_OUT, 'w', encoding='utf-8') as fh:
+        fh.write(json.dumps(payload, ensure_ascii=False, indent=1) + '\n')
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--print', action='store_true', help='파일을 쓰지 않고 출력만')
+    parser.add_argument('--calendar', action='store_true', help='이번 주 경제 일정만 갱신')
+    parser.add_argument('--ff', help='이미 받아 둔 ForexFactory JSON 파일로 일정을 만든다(사이트 호출 제한 회피)')
     args = parser.parse_args()
+
+    if args.calendar:
+        calendar = build_calendar(args.ff)
+        text = json.dumps(calendar, ensure_ascii=False, indent=1) + '\n'
+        if args.print:
+            print(text)
+            return 0
+        changed = save_calendar(calendar)
+        print(('저장: ' if changed else '변화 없음 — 그대로 둡니다: ') + CAL_OUT)
+        print('이번 주', calendar['weekStart'], '~', calendar['weekEnd'],
+              '| 미국 일정', len(calendar['events']), '건')
+        for event in calendar['events']:
+            print(' ', event['date'], event['time'], ('★★★' if event['impact'] == 'high' else ' ★★'), event['title'])
+        return 0
 
     payload = build()
     text = json.dumps(payload, ensure_ascii=False, indent=1) + '\n'
@@ -302,6 +508,7 @@ def main():
     if os.path.exists(OUT):
         with open(OUT, encoding='utf-8') as fh:
             previous = fh.read()
+    unchanged = False
     if previous:
         try:
             old = json.loads(previous)
@@ -309,16 +516,26 @@ def main():
             if json.dumps(old.get('markets'), sort_keys=True) == json.dumps(payload.get('markets'), sort_keys=True) \
                     and json.dumps(old.get('crypto'), sort_keys=True) == json.dumps(payload.get('crypto'), sort_keys=True):
                 print('변화 없음 — 파일을 그대로 둡니다')
-                return 0
+                unchanged = True
         except Exception:  # noqa: BLE001
             pass
-    with open(OUT, 'w', encoding='utf-8') as fh:
-        fh.write(text)
-    print('저장:', OUT)
-    print('NQ', payload['markets']['nq'].get('price'), payload['markets']['nq'].get('changePct'),
-          '| 김프', payload['crypto'].get('kimchiPct'), '| F&G', payload['crypto'].get('fng'))
+    if not unchanged:
+        with open(OUT, 'w', encoding='utf-8') as fh:
+            fh.write(text)
+        print('저장:', OUT)
+        print('NQ', payload['markets']['nq'].get('price'), payload['markets']['nq'].get('changePct'),
+              '| 김프', payload['crypto'].get('kimchiPct'), '| F&G', payload['crypto'].get('fng'))
     if payload['warnings']:
         print('경고:', '; '.join(payload['warnings']))
+
+    # 이번 주 경제 일정 — 실패해도 시황 스냅숏은 그대로 둔다
+    try:
+        calendar = build_calendar()
+        changed = save_calendar(calendar)
+        print(('일정 저장: ' if changed else '일정 변화 없음: ') + CAL_OUT,
+              '|', calendar['weekStart'], '~', calendar['weekEnd'], '| 미국 일정', len(calendar['events']), '건')
+    except Exception as exc:  # noqa: BLE001
+        print('일정을 받지 못했습니다:', exc)
     return 0
 
 
