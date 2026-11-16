@@ -17,7 +17,9 @@
 
   const JSON_URL = 'data/global.json';
   const TICK_MS = 5000;
-  const DUE = { json: 5 * 60000, kimchi: 30000, cg: 3 * 60000, fng: 10 * 60000, fx: 30 * 60000 };
+  // 업비트 REST는 Origin(사이트 주소) 단위로 1분에 10번 정도만 허용한다 — 모든 방문자가 같은 Origin을 쓰므로
+  // 평소에는 웹소켓으로 받고, 웹소켓이 막힌 환경에서만 REST로 드문드문 받는다.
+  const DUE = { json: 5 * 60000, prices: 60000, upbitRest: 5 * 60000, cg: 3 * 60000, fng: 10 * 60000, fx: 30 * 60000 };
   const STALE_MS = 30 * 60000;
 
   const SPEC = [
@@ -111,13 +113,17 @@
     state.due.json = Date.now() + DUE.json;
   }
 
-  async function loadKimchi() {
-    const jobs = [
+  // ---- 김프 재료: 코인베이스(달러) · 업비트(원) · 환율 ----
+  // 업비트는 웹소켓으로 실시간 체결가를 받는다(공개 웹소켓, Origin 제한 없음).
+  // 웹소켓이 막히면 REST로 5분에 한 번만 받는다 — REST는 Origin당 분당 호출 수가 작아 자주 부르면
+  // 사이트 전체가 429를 맞는다.
+  const upbit = { ws: null, state: 'idle', retry: 0, timer: 0, paintTimer: 0 };
+
+  async function loadPrices() {
+    const [btcUsd, ethUsd] = await Promise.allSettled([
       getJSON('https://api.exchange.coinbase.com/products/BTC-USD/ticker', 7000),
-      getJSON('https://api.upbit.com/v1/ticker?markets=KRW-BTC', 7000),
       getJSON('https://api.exchange.coinbase.com/products/ETH-USD/ticker', 7000),
-    ];
-    const [btcUsd, upbit, ethUsd] = await Promise.allSettled(jobs);
+    ]);
     let touched = false;
     if (btcUsd.status === 'fulfilled') {
       const price = num(btcUsd.value && btcUsd.value.price);
@@ -125,11 +131,7 @@
     }
     if (ethUsd.status === 'fulfilled') {
       const price = num(ethUsd.value && ethUsd.value.price);
-      if (price) state.live.ethUsd = price;
-    }
-    if (upbit.status === 'fulfilled' && Array.isArray(upbit.value) && upbit.value[0]) {
-      const price = num(upbit.value[0].trade_price);
-      if (price) { state.live.btcKrw = price; touched = true; }
+      if (price) { state.live.ethUsd = price; touched = true; }
     }
     // 환율은 원/달러 카드와 같은 값을 쓴다 (global.json의 KRW=X → 없으면 er-api)
     if (!state.live.fx && !num(state.cryptoJson.usdKrw)) await loadFx();
@@ -137,7 +139,87 @@
       state.liveAt = Date.now();
       paint();
     }
-    state.due.kimchi = Date.now() + DUE.kimchi;
+    state.due.prices = Date.now() + DUE.prices;
+  }
+
+  function upbitPrice(price) {
+    state.live.btcKrw = price;
+    state.liveAt = Date.now();
+    if (upbit.paintTimer) return;   // 체결이 초당 여러 번 와도 화면은 1초에 한 번만 고친다
+    upbit.paintTimer = setTimeout(() => {
+      upbit.paintTimer = 0;
+      paint();
+    }, 900);
+  }
+
+  async function onUpbitMessage(event) {
+    try {
+      const raw = typeof event.data === 'string' ? event.data
+        : (event.data && event.data.text ? await event.data.text() : '');
+      const data = JSON.parse(raw);
+      const row = Array.isArray(data) ? data[0] : data;
+      if (row && row.type === 'ticker' && row.code === 'KRW-BTC') {
+        const price = num(row.trade_price);
+        if (price) upbitPrice(price);
+      }
+    } catch (error) {
+      // 이상한 메시지는 버린다 — 소켓은 그대로 둔다
+    }
+  }
+
+  function scheduleUpbitRetry() {
+    upbit.retry += 1;
+    const delay = Math.min(60000, 4000 * Math.pow(2, Math.min(4, upbit.retry)));
+    clearTimeout(upbit.timer);
+    upbit.timer = setTimeout(openUpbit, delay);
+  }
+
+  function openUpbit() {
+    if (upbit.ws) return;
+    if (typeof WebSocket === 'undefined') { upbit.state = 'down'; return; }
+    let ws;
+    try {
+      ws = new WebSocket('wss://api.upbit.com/websocket/v1');
+    } catch (error) {
+      upbit.state = 'down';
+      scheduleUpbitRetry();
+      return;
+    }
+    upbit.ws = ws;
+    upbit.state = 'connecting';
+    const failTimer = setTimeout(() => {
+      if (upbit.state === 'connecting') {
+        upbit.state = 'down';
+        try { ws.close(); } catch (error) { /* 이미 닫힘 */ }
+      }
+    }, 9000);
+    ws.onopen = () => {
+      upbit.state = 'live';
+      upbit.retry = 0;
+      clearTimeout(failTimer);
+      try {
+        ws.send(JSON.stringify([{ ticket: 'pixel-trading-floor' }, { type: 'ticker', codes: ['KRW-BTC'] }]));
+      } catch (error) { /* 아래 onclose가 다시 시도한다 */ }
+    };
+    ws.onmessage = onUpbitMessage;
+    ws.onerror = () => {};
+    ws.onclose = () => {
+      clearTimeout(failTimer);
+      upbit.ws = null;
+      if (upbit.state === 'live' || upbit.state === 'connecting') {
+        upbit.state = 'down';
+        scheduleUpbitRetry();
+      }
+    };
+  }
+
+  async function loadUpbitRest() {
+    const rows = await getJSON('https://api.upbit.com/v1/ticker?markets=KRW-BTC', 7000);
+    const price = num(rows && rows[0] && rows[0].trade_price);
+    if (price) upbitPrice(price);
+    // 실패하면(429 등) 다음 시도를 두 배로 미룬다 — 최대 30분
+    upbit.retry += 1;
+    state.due.upbitRest = Date.now() + Math.min(30 * 60000, DUE.upbitRest * Math.pow(2, Math.min(3, upbit.retry - 1)));
   }
 
   async function loadFx() {
@@ -502,7 +584,8 @@
     if (document.visibilityState === 'hidden') return;
     const now = Date.now();
     if (force || now >= state.due.json) guard('json', loadJson);
-    if (force || now >= state.due.kimchi) guard('kimchi', loadKimchi);
+    if (force || now >= state.due.prices) guard('prices', loadPrices);
+    if (upbit.state === 'down' && (force || now >= state.due.upbitRest)) guard('upbit', loadUpbitRest);
     if (force || now >= state.due.cg) guard('coingecko', loadCoingecko);
     if (force || now >= state.due.fng) guard('fng', loadFng);
     if (now >= state.due.fx) guard('fx', loadFx);
@@ -544,16 +627,29 @@
     // 탭을 바꾸면 숨어 있던 캔버스가 처음 크기를 얻는다 — 그때 다시 그린다
     new MutationObserver(() => requestAnimationFrame(() => paint()))
       .observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') tick(true); });
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible') return;
+      if (!upbit.ws) { upbit.state = 'idle'; openUpbit(); }
+      tick(true);
+    });
     setInterval(tick, TICK_MS);
     guard('json', loadJson);
-    guard('kimchi', loadKimchi);
+    guard('prices', loadPrices);
     guard('coingecko', loadCoingecko);
+    openUpbit();
     guard('fng', loadFng);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
 
-  window.LiteGlobal = { state, rows, paint, refresh: () => tick(true), syncLabel };
+  window.LiteGlobal = {
+    state, rows, paint, refresh: () => tick(true), syncLabel,
+    debug: () => ({
+      upbit: upbit.state, retry: upbit.retry,
+      btcKrw: state.live.btcKrw, btcUsd: state.live.btcUsd, ethUsd: state.live.ethUsd, fx: state.live.fx,
+      cg: state.live.cg, fng: state.live.fng,
+      jsonAt: state.jsonAt, liveAt: state.liveAt, due: state.due,
+    }),
+  };
 })();
