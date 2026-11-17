@@ -488,7 +488,8 @@
     } catch (e) { /* OI 흐름이 없어도 규모는 표시된다 */ }
 
     const ratio = await loadRatio(symbol);
-    if (ratio) { data.longShare = ratio; } else problems.push('account-ratio');
+    if (ratio) { data.longShare = ratio; }
+    else problems.push(`account-ratio(${loadRatio.lastError || '응답 비어 있음'})`);
     data.problems = problems;
 
     if (data.symbol === state.symbol) {
@@ -501,23 +502,24 @@
     }
   }
 
-  /* 롱/숏 계정 비율 — 계정 기준(account-ratio)이 비어 오면 종목 기준(long-short-ratio)으로 물러난다.
-     둘 다 값이 없으면 화면은 '—'를 유지한다 */
   async function loadRatio(symbol) {
+    loadRatio.lastError = '';
     try {
       const body = await getJSON(`${API}/account-ratio?category=linear&symbol=${symbol}&period=1h&limit=1`);
       const row = (body.list || [])[0];
       const buy = num(row && row.buyRatio);
       const sell = num(row && row.sellRatio);
       if (buy != null && sell != null && buy + sell > 0) return buy / (buy + sell);
-    } catch (e) { /* 다음 시도로 넘어간다 */ }
+      loadRatio.lastError = `계정기준 비어 있음(list=${(body.list || []).length})`;
+    } catch (e) { loadRatio.lastError = `계정기준 ${e && e.name ? e.name : '실패'}`; }
     try {
       const body = await getJSON(`${API}/long-short-ratio?category=linear&symbol=${symbol}&period=1h&limit=1`);
       const row = (body.list || [])[0];
       const buy = num(row && row.buyRatio);
       const sell = num(row && row.sellRatio);
       if (buy != null && sell != null && buy + sell > 0) return buy / (buy + sell);
-    } catch (e) { /* 값이 없을 뿐이다 */ }
+      loadRatio.lastError += ` · 종목기준 비어 있음(list=${(body.list || []).length})`;
+    } catch (e) { loadRatio.lastError += ` · 종목기준 ${e && e.name ? e.name : '실패'}`; }
     return null;
   }
 
