@@ -705,11 +705,8 @@
     if (candles.length < 2) return;
 
     const padTop = 10;
-    const padRight = 66;
     const volumeH = 44;
     const padBottom = 22;
-    const plotH = box.height - padTop - padBottom - volumeH - 6;
-    const plotW = box.width - padRight - 6;
 
     let min = Infinity;
     let max = -Infinity;
@@ -722,6 +719,20 @@
     const span = (max - min) || max * 0.001 || 1;
     min -= span * 0.04;
     max += span * 0.04;
+
+    // 오른쪽 축 가격표 폭은 실제 글자 폭에 맞춘다 — 휴대폰에선 차트를 넓게 쓰고, 숫자가 길면 넓힌다
+    const price = state.summary && state.summary.price != null ? state.summary.price : candles[candles.length - 1].c;
+    const hasPrice = Number.isFinite(price) && price > min && price < max;
+    ctx.font = '9.5px Arial, sans-serif';
+    let padRight = 56;
+    for (const [value, name] of [[levels.support, '지지'], [levels.resistance, '저항']]) {
+      if (Number.isFinite(value)) padRight = Math.max(padRight, Math.ceil(ctx.measureText(`${name} ${priceText(value)}`).width) + 16);
+    }
+    if (Number.isFinite(price)) padRight = Math.max(padRight, Math.ceil(ctx.measureText(priceText(price)).width) + 16);
+    padRight = Math.min(padRight, Math.round(box.width * 0.36));
+
+    const plotH = box.height - padTop - padBottom - volumeH - 6;
+    const plotW = box.width - padRight - 6;
     const y = (v) => padTop + (1 - (v - min) / (max - min)) * plotH;
     const xStep = plotW / candles.length;
     const x = (i) => i * xStep + xStep / 2;
@@ -740,24 +751,19 @@
       ctx.fillText(priceText(v), plotW + 8, py + 3);
     }
 
-    // 지지/저항선
-    const drawLevel = (v, color, label) => {
-      if (!Number.isFinite(v)) return;
-      const py = Math.round(y(v)) + 0.5;
+    // 지지/저항선 — 선은 제값 위치에 긋고, 이름·가격표는 오른쪽 축에 겹치지 않게 쌓는다
+    for (const line of [
+      { value: levels.support, color: '#22c58b' },
+      { value: levels.resistance, color: '#f05268' },
+    ]) {
+      if (!Number.isFinite(line.value)) continue;
+      const py = Math.round(y(line.value)) + 0.5;
       ctx.save();
       ctx.setLineDash([6, 4]);
-      ctx.strokeStyle = color;
+      ctx.strokeStyle = line.color;
       ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(plotW, py); ctx.stroke();
       ctx.restore();
-      ctx.fillStyle = color;
-      ctx.fillRect(plotW - 74, py - 9, 72, 17);
-      ctx.fillStyle = '#0b0e13';
-      ctx.textAlign = 'center';
-      ctx.fillText(`${label} ${priceText(v)}`, plotW - 38, py + 3);
-      ctx.textAlign = 'left';
-    };
-    drawLevel(levels.support, '#22c58b', '지지');
-    drawLevel(levels.resistance, '#f05268', '저항');
+    }
 
     // 거래량
     let vMax = 0;
@@ -790,22 +796,72 @@
       if (rise) { ctx.strokeRect(cx - bw / 2, top, bw, bh); }
     }
 
-    // 현재가 점선 + 오른쪽 태그
-    const price = state.summary && state.summary.price != null ? state.summary.price : candles[candles.length - 1].c;
-    if (Number.isFinite(price) && price > min && price < max) {
+    // 현재가 점선
+    if (hasPrice) {
       const py = Math.round(y(price)) + 0.5;
       ctx.save();
       ctx.setLineDash([4, 4]);
       ctx.strokeStyle = '#e2e8f0';
       ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(plotW, py); ctx.stroke();
       ctx.restore();
-      ctx.fillStyle = '#26324a';
-      ctx.fillRect(plotW + 2, py - 9, padRight - 6, 17);
-      ctx.fillStyle = '#eef2f8';
-      ctx.textAlign = 'center';
-      ctx.fillText(priceText(price), plotW + 2 + (padRight - 6) / 2, py + 3);
-      ctx.textAlign = 'left';
     }
+
+    // 오른쪽 축 가격표 — 지지·저항·현재가가 서로 겹치면 위아래로 밀어 쌓고,
+    // 밀린 표는 실제 선 위치까지 얇은 연결선을 그어 어느 선인지 알아볼 수 있게 한다
+    const tagH = 16;
+    const gutterLeft = plotW + 3;
+    const gutterWidth = padRight - 6;
+    const tags = [];
+    const addTag = (value, name, color, kind) => {
+      if (!Number.isFinite(value) || value < min || value > max) return;
+      ctx.font = '9.5px Arial, sans-serif';
+      let text = name ? `${name} ${priceText(value)}` : priceText(value);
+      if (ctx.measureText(text).width > gutterWidth - 6) text = priceText(value);
+      tags.push({ y: y(value), text, color, kind });
+    };
+    addTag(levels.support, '지지', '#22c58b', 'level');
+    addTag(levels.resistance, '저항', '#f05268', 'level');
+    if (hasPrice) addTag(price, '', '#eef2f8', 'price');
+
+    tags.sort((a, b) => a.y - b.y);
+    let stackBottom = -Infinity;
+    for (const tag of tags) {
+      let top = tag.y - tagH / 2;
+      if (top < stackBottom + 1) top = stackBottom + 1;
+      if (top > box.height - tagH - 1) top = Math.max(stackBottom + 1, box.height - tagH - 1);
+      tag.top = top;
+      stackBottom = top + tagH;
+    }
+
+    for (const tag of tags) {
+      const cy = tag.top + tagH / 2;
+      if (Math.abs(cy - tag.y) > 1.5) {
+        ctx.save();
+        ctx.globalAlpha = .45;
+        ctx.strokeStyle = tag.color;
+        ctx.beginPath();
+        ctx.moveTo(plotW + 1, Math.round(tag.y) + 0.5);
+        ctx.lineTo(gutterLeft, cy);
+        ctx.stroke();
+        ctx.restore();
+      }
+      if (tag.kind === 'price') {
+        ctx.fillStyle = '#26324a';
+        ctx.fillRect(gutterLeft, tag.top, gutterWidth, tagH);
+        ctx.fillStyle = '#eef2f8';
+      } else {
+        ctx.fillStyle = 'rgba(11,14,19,.94)';
+        ctx.fillRect(gutterLeft, tag.top, gutterWidth, tagH);
+        ctx.fillStyle = tag.color;
+        ctx.fillRect(gutterLeft, tag.top, 2, tagH);
+      }
+      ctx.font = '9.5px Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(tag.text, gutterLeft + gutterWidth / 2 + 1, cy + 0.5);
+    }
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
   }
 
   /* ---------------------------------------------------------------- 실시간 수급 스캐너 */
