@@ -502,16 +502,23 @@
     }
   }
 
+  async function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+  /* 롱/숏 비율 — account-ratio가 가끔 HTTP 200에 빈 목록을 준다(불규칙). 짧게 몇 번 다시 부르고,
+     종목 기준(long-short-ratio)으로도 물러난다. 그래도 없으면 화면은 '—'를 유지하고 30초 주기로 다시 시도한다 */
   async function loadRatio(symbol) {
     loadRatio.lastError = '';
-    try {
-      const body = await getJSON(`${API}/account-ratio?category=linear&symbol=${symbol}&period=1h&limit=1`);
-      const row = (body.list || [])[0];
-      const buy = num(row && row.buyRatio);
-      const sell = num(row && row.sellRatio);
-      if (buy != null && sell != null && buy + sell > 0) return buy / (buy + sell);
-      loadRatio.lastError = `계정기준 비어 있음(list=${(body.list || []).length})`;
-    } catch (e) { loadRatio.lastError = `계정기준 ${e && e.name ? e.name : '실패'}`; }
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const body = await getJSON(`${API}/account-ratio?category=linear&symbol=${symbol}&period=1h&limit=1`);
+        const row = (body.list || [])[0];
+        const buy = num(row && row.buyRatio);
+        const sell = num(row && row.sellRatio);
+        if (buy != null && sell != null && buy + sell > 0) return buy / (buy + sell);
+        loadRatio.lastError = `계정기준 빈 목록(list=${(body.list || []).length})`;
+      } catch (e) { loadRatio.lastError = `계정기준 ${e && e.name ? e.name : '실패'}`; }
+      if (attempt < 2) await sleep(1500);
+    }
     try {
       const body = await getJSON(`${API}/long-short-ratio?category=linear&symbol=${symbol}&period=1h&limit=1`);
       const row = (body.list || [])[0];
@@ -570,7 +577,11 @@
 
     const note = $('#dash-flow-note');
     if (state.summaryError) { note.textContent = `${state.summaryError} · 30초 뒤 다시`; note.className = 'dash-flow-note is-error'; }
-    else if (d.problems && d.problems.length) { note.textContent = `${d.problems.join(' · ')} · 다음 갱신에 다시`; note.className = 'dash-flow-note is-error'; }
+    else if (d.problems && d.problems.length) {
+      const friendly = d.problems.map((p) => p.startsWith('tickers') ? '시세 스캐너 대기 중' : p.startsWith('account-ratio') ? '롱/숏 비율 갱신 중' : p).join(' · ');
+      note.textContent = `${friendly} · 다음 갱신에 다시`;
+      note.className = 'dash-flow-note is-error';
+    }
     else {
       note.textContent = `Bybit 선형 무기한 · ${d.intervalHours || 8}시간 펀딩 · 30초 갱신 · 롱/숏 계정 기준`;
       note.className = 'dash-flow-note';
