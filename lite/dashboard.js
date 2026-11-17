@@ -739,6 +739,33 @@
     const xStep = plotW / candles.length;
     const x = (i) => i * xStep + xStep / 2;
 
+    // 오른쪽 축 가격표 배치 — 지지·저항·현재가가 서로 가까우면 위아래로 밀어 쌓는다.
+    // 눈금 숫자는 이 표와 겹치면 그리지 않는다.
+    const tagH = 16;
+    const gutterLeft = plotW + 3;
+    const gutterWidth = padRight - 6;
+    const tags = [];
+    const addTag = (value, name, color, kind) => {
+      if (!Number.isFinite(value) || value < min || value > max) return;
+      ctx.font = '9.5px Arial, sans-serif';
+      let text = name ? `${name} ${priceText(value)}` : priceText(value);
+      if (ctx.measureText(text).width > gutterWidth - 6) text = priceText(value);
+      tags.push({ y: y(value), text, color, kind });
+    };
+    addTag(levels.support, '지지', '#22c58b', 'level');
+    addTag(levels.resistance, '저항', '#f05268', 'level');
+    if (hasPrice) addTag(price, '', '#eef2f8', 'price');
+    tags.sort((a, b) => a.y - b.y);
+    let stackBottom = -Infinity;
+    for (const tag of tags) {
+      let top = tag.y - tagH / 2;
+      if (top < stackBottom + 1) top = stackBottom + 1;
+      if (top > box.height - tagH - 1) top = Math.max(stackBottom + 1, box.height - tagH - 1);
+      tag.top = top;
+      stackBottom = top + tagH;
+    }
+    const underTag = (py) => tags.some((tag) => py + 4 > tag.top && py - 7 < tag.top + tagH);
+
     // 눈금
     ctx.font = '10px Arial, sans-serif';
     ctx.fillStyle = '#66748a';
@@ -750,7 +777,7 @@
       const v = min + ((max - min) * i) / gridLines;
       const py = Math.round(y(v)) + 0.5;
       ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(plotW, py); ctx.stroke();
-      ctx.fillText(priceText(v), plotW + 8, py + 3);
+      if (!underTag(py)) ctx.fillText(priceText(v), plotW + 8, py + 3);
     }
 
     // 지지/저항선 — 선은 제값 위치에 긋고, 이름·가격표는 오른쪽 축에 겹치지 않게 쌓는다
@@ -810,31 +837,6 @@
 
     // 오른쪽 축 가격표 — 지지·저항·현재가가 서로 겹치면 위아래로 밀어 쌓고,
     // 밀린 표는 실제 선 위치까지 얇은 연결선을 그어 어느 선인지 알아볼 수 있게 한다
-    const tagH = 16;
-    const gutterLeft = plotW + 3;
-    const gutterWidth = padRight - 6;
-    const tags = [];
-    const addTag = (value, name, color, kind) => {
-      if (!Number.isFinite(value) || value < min || value > max) return;
-      ctx.font = '9.5px Arial, sans-serif';
-      let text = name ? `${name} ${priceText(value)}` : priceText(value);
-      if (ctx.measureText(text).width > gutterWidth - 6) text = priceText(value);
-      tags.push({ y: y(value), text, color, kind });
-    };
-    addTag(levels.support, '지지', '#22c58b', 'level');
-    addTag(levels.resistance, '저항', '#f05268', 'level');
-    if (hasPrice) addTag(price, '', '#eef2f8', 'price');
-
-    tags.sort((a, b) => a.y - b.y);
-    let stackBottom = -Infinity;
-    for (const tag of tags) {
-      let top = tag.y - tagH / 2;
-      if (top < stackBottom + 1) top = stackBottom + 1;
-      if (top > box.height - tagH - 1) top = Math.max(stackBottom + 1, box.height - tagH - 1);
-      tag.top = top;
-      stackBottom = top + tagH;
-    }
-
     for (const tag of tags) {
       const cy = tag.top + tagH / 2;
       if (Math.abs(cy - tag.y) > 1.5) {
