@@ -404,7 +404,7 @@
     bar.id = 'gbar';
     bar.setAttribute('role', 'region');
     bar.setAttribute('aria-label', '글로벌 시황 전광판');
-    bar.innerHTML = '<span class="gb-brand">◆ 글로벌 시황 ◆</span>'
+    bar.innerHTML = '<span class="gb-brand"><b>◆</b><span class="gb-brand-text">글로벌 시황</span><b>◆</b></span>'
       + '<div class="gb-track">' + SPEC.map((spec) => `<span class="gb-item" data-k="${spec.key}">`
         + `<span class="gb-lbl">${spec.short}</span>`
         + '<span class="gb-pair"><b class="gb-val">—</b><em class="gb-chg"></em><em class="gb-note"></em></span>'
@@ -442,7 +442,9 @@
       cell.title = row.title || '';
     });
     const clock = bar.querySelector('.gb-clock');
-    bar.querySelector('.gb-time').textContent = syncLabel(false);
+    const clockTime = bar.querySelector('.gb-time');
+    clockTime.textContent = syncLabel(false);
+    clockTime.dataset.short = syncLabel(false).replace('SYNC ', '').replace(' KST', '');
     clock.classList.toggle('stale', isStale());
   }
 
@@ -683,7 +685,10 @@
     if (bar) {
       const time = bar.querySelector('.gb-time');
       const clock = bar.querySelector('.gb-clock');
-      if (time) time.textContent = syncLabel(false);
+      if (time) {
+        time.textContent = syncLabel(false);
+        time.dataset.short = syncLabel(false).replace('SYNC ', '').replace(' KST', '');
+      }
       if (clock) clock.classList.toggle('stale', isStale());
     }
     const box = $('#scr-global');

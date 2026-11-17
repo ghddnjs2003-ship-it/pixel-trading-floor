@@ -32,6 +32,7 @@
   display: flex;
   align-items: center;
   flex: none;
+  gap: 5px;
   padding: 0 12px;
   background: #12121c;
   color: var(--gold, #e8c84a);
@@ -273,20 +274,27 @@ html.screener-view #app > #gbar { display: none !important; }
 
 /* ============ 좁은 화면 ============ */
 @media (max-width: 820px) {
-  /* 좁은 화면: 항목은 옆으로 밀어 보고, SYNC 시계만 오른쪽에 붙여 둔다 */
-  #gbar { height: 32px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
-  #gbar::-webkit-scrollbar { display: none; }
-  .gb-brand { flex: 0 0 auto; padding: 0 9px; font-size: 10px; }
-  .gb-track { flex: 0 0 auto; }
-  .gb-item { flex: 0 0 auto; padding: 0 10px; gap: 5px; }
+  /* 좁은 화면: 항목만 옆으로 밀고(시계가 값 위에 겹치지 않게), ◆ 표식만 남긴다 */
+  #gbar { height: 32px; overflow: hidden; }
+  .gb-brand { display: none; }
+  .gb-track {
+    flex: 1 1 auto; min-width: 0; overflow-x: auto; overflow-y: hidden;
+    scrollbar-width: none; scroll-snap-type: x proximity;
+    -webkit-mask-image: linear-gradient(to right, #000 0, #000 86%, transparent 100%);
+    mask-image: linear-gradient(to right, #000 0, #000 86%, transparent 100%);
+  }
+  .gb-track::-webkit-scrollbar { display: none; }
+  .gb-item { flex: 0 0 auto; padding: 0 10px; gap: 5px; scroll-snap-align: start; }
   #gbar .gb-chg { display: none; }
   .gb-lbl { font-size: 9px; }
   .gb-val { font-size: 12px; }
-  .gb-clock { position: sticky; right: 0; z-index: 3; padding: 0 9px; font-size: 9px; box-shadow: -10px 0 10px 2px #08080e; }
+  .gb-clock { flex: 0 0 auto; padding: 0 9px; border-left: 2px solid #000; font-size: 9px; }
+  .gb-clock .gb-time { font-size: 0; }
+  .gb-clock .gb-time::after { content: attr(data-short); font-size: 9px; }
 
   /* 트레이딩 화면: 상단 바 48px + 전광판 32px */
   html.trading-view #app > #gbar { inset: 48px 0 auto; height: 32px; }
-  html.trading-view #trade-page { inset: calc(48px + 32px) 0 0; overflow: hidden; }
+  html.trading-view #trade-page { inset: calc(48px + 32px) 0 0; }
 
   #scr-global { padding: 8px 8px 9px; }
   .sg-head { gap: 7px; margin-bottom: 7px; }

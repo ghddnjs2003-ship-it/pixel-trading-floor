@@ -39,7 +39,7 @@
     feed: null, requestSeq: 0, loadTimer: 0, markTimer: 0, accountTimer: 0, pending: [], tab: 'positions',
     marginMode: 'ISOLATED', indicators: new Set(['ma20', 'ma50', 'volume']),
     chart: { visibleCount: 100, rightTime: null, drag: null, loadingOlder: false, exhausted: false },
-    book: { bids: new Map(), asks: new Map() }, orderSide: 'LONG', latestDecision: null,
+    book: { bids: new Map(), asks: new Map() }, orderSide: 'LONG', latestDecision: null, mobileView: 'chart',
   };
 
   const topbar = $('#topbar');
@@ -47,7 +47,7 @@
   const nav = document.createElement('nav');
   nav.id = 'view-switch';
   nav.setAttribute('aria-label', '화면 전환');
-  nav.innerHTML = '<button type="button" data-view="office" class="active">사무실</button><button type="button" data-view="screener">스크리너</button><button type="button" data-view="whale" title="실시간 고래 입출금 · 이번 주 경제 일정">고래·일정</button><button type="button" data-view="trading" disabled aria-disabled="true" title="실전 연동 예정">트레이딩</button>';
+  nav.innerHTML = '<button type="button" data-view="office" class="active">사무실</button><button type="button" data-view="screener">스크리너</button><button type="button" data-view="whale" title="실시간 고래 입출금 · 이번 주 경제 일정">고래·일정</button><button type="button" data-view="trading" title="데모 트레이딩 — 실시간 시세 · 모의 주문">트레이딩</button>';
   topbar.insertBefore(nav, $('#controls'));
   nav.addEventListener('click', (event) => {
     const button = event.target.closest('[data-view]');
@@ -69,6 +69,12 @@
       <div class="trade-ai-levels"><span>진입 <b id="trade-ai-entry">—</b></span><span>TP <b id="trade-ai-target">—</b></span><span>SL <b id="trade-ai-stop">—</b></span></div>
       <button id="trade-ai-apply" type="button" disabled>주문창에 적용</button>
     </section>
+    <nav class="trade-msv" id="trade-msv" role="tablist" aria-label="트레이딩 화면 전환">
+      <button type="button" role="tab" data-tview="chart" class="active" aria-selected="true">차트</button>
+      <button type="button" role="tab" data-tview="order" aria-selected="false">주문</button>
+      <button type="button" role="tab" data-tview="book" aria-selected="false">호가</button>
+      <button type="button" role="tab" data-tview="positions" aria-selected="false">포지션 <b id="trade-msv-count">0</b></button>
+    </nav>
     <div class="trade-layout">
       <main class="trade-main">
         <section class="trade-chart-panel">
@@ -98,7 +104,7 @@
         <label class="trade-field"><span>레버리지</span><select id="trade-leverage">${Array.from({ length: 50 }, (_, i) => `<option value="${i + 1}"${i === 4 ? ' selected' : ''}>${i + 1}x</option>`).join('')}</select></label>
         <div class="trade-side-select" id="trade-side-select"><span>방향</span><button type="button" data-select-side="LONG" class="selected long">LONG</button><button type="button" data-select-side="SHORT" class="short">SHORT</button></div>
         <div class="trade-order-types"><button type="button" data-order-type="market" class="active">시장가</button><button type="button" data-order-type="limit">지정가</button></div>
-        <label class="trade-field"><span id="trade-price-label">시장가 예상 가격</span><input id="trade-limit-price" type="number" min="0" step="any" inputmode="decimal" placeholder="Bybit 현재가" disabled></label>
+        <label class="trade-field trade-field-wide"><span id="trade-price-label">시장가 예상 가격</span><input id="trade-limit-price" type="number" min="0" step="any" inputmode="decimal" placeholder="Bybit 현재가" disabled></label>
         <div class="trade-risk-fields">
           <label class="trade-field"><span>익절가 TP (선택)</span><input id="trade-tp" type="number" min="0" step="any" inputmode="decimal" placeholder="미설정"></label>
           <label class="trade-field"><span>손절가 SL (선택)</span><input id="trade-sl" type="number" min="0" step="any" inputmode="decimal" placeholder="미설정"></label>
@@ -113,6 +119,33 @@
     </div>
     <footer class="trade-account-footer"><span>모의 계좌</span><span>잔고 <b id="trade-footer-balance">—</b> USDT</span><span>평가 자산 <b id="trade-footer-equity">—</b> USDT</span><span>미실현 손익 <b id="trade-footer-pnl">—</b> USDT</span><span>사용 가능 <b id="trade-footer-available">—</b> USDT</span></footer>`;
   document.body.appendChild(page);
+
+  // 휴대폰: 한 번에 한 화면 — 차트 · 주문 · 호가 · 포지션 (넓은 화면은 탭을 숨기고 세 칸을 함께 보여 준다)
+  const PANE_SELECTORS = { chart: '.trade-chart-panel', order: '.trade-ticket', book: '.trade-orderbook', positions: '.trade-orders-panel' };
+  Object.keys(PANE_SELECTORS).forEach((key) => {
+    const pane = $(PANE_SELECTORS[key]);
+    if (pane) pane.dataset.pane = key;
+  });
+  page.dataset.tview = state.mobileView;
+  function setMobileView(view) {
+    if (!PANE_SELECTORS[view]) return;
+    state.mobileView = view;
+    page.dataset.tview = view;
+    $$('#trade-msv [data-tview]').forEach((button) => {
+      const on = button.dataset.tview === view;
+      button.classList.toggle('active', on);
+      button.setAttribute('aria-selected', String(on));
+    });
+    const pane = $(PANE_SELECTORS[view]);
+    if (pane) pane.scrollTop = 0;
+    if (view === 'chart') requestAnimationFrame(drawChart);
+    if (view === 'book') requestAnimationFrame(renderOrderBook);
+  }
+  $('#trade-msv').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-tview]');
+    if (button) setMobileView(button.dataset.tview);
+  });
+
   state.latestDecision = readStoredDecision();
   window.LITE.latestDecision = state.latestDecision;
   renderDecisionBanner();
@@ -272,6 +305,7 @@
       refreshSubscriptions();
       refreshTimer();
       renderPositions();
+      if (state.mobileView === 'chart') requestAnimationFrame(drawChart);
     } else {
       if (state.loadTimer) clearInterval(state.loadTimer);
       if (state.markTimer) clearInterval(state.markTimer);
@@ -379,6 +413,8 @@
     }
     updateTicket();
     $('#trade-order-error').textContent = 'AI 추천 방향과 가격을 주문창에 적용했습니다. 주문을 확인한 뒤 실행하세요.';
+    // 휴대폰은 주문 화면으로 넘겨 채워진 값을 바로 보게 한다
+    if (window.matchMedia('(max-width: 820px)').matches) setMobileView('order');
   }
 
   async function loadMarket() {
@@ -566,11 +602,21 @@
     }
   }
 
+  // 호가 단 수는 호가창 높이에 맞춘다 — 휴대폰에서 28줄이 눌려 글자가 겹치지 않게
+  function orderBookLevels() {
+    const side = $('#trade-asks');
+    const height = side ? side.clientHeight : 0;
+    if (height < 40) return 14;
+    return Math.max(4, Math.min(14, Math.floor(height / 18)));
+  }
+
   function renderOrderBook() {
+    const levels = orderBookLevels();
+    // 매도 호가는 현재가에 가까운(낮은) 단부터 남기고 다시 높은 순으로 그린다
     const asks = [...state.book.asks.entries()].filter(([, quantity]) => quantity > 0)
-      .sort((a, b) => b[0] - a[0]).slice(0, 14);
+      .sort((a, b) => a[0] - b[0]).slice(0, levels).reverse();
     const bids = [...state.book.bids.entries()].filter(([, quantity]) => quantity > 0)
-      .sort((a, b) => b[0] - a[0]).slice(0, 14);
+      .sort((a, b) => b[0] - a[0]).slice(0, levels);
     const rows = (items, side) => {
       let cumulative = 0;
       const totals = new Array(items.length);
@@ -768,6 +814,7 @@
     if (!$('#trade-table-body')) return;
     const snapshot = LITE.paper.snapshot();
     $('#trade-open-count').textContent = snapshot.open.length;
+    if ($('#trade-msv-count')) $('#trade-msv-count').textContent = snapshot.open.length;
     updateTicket();
     const head = $('#trade-table-head');
     const body = $('#trade-table-body');
@@ -780,7 +827,7 @@
         const roe = Number(position.roePct) || 0;
         return `<tr><td>${safe(position.symbol.replace(/USDT$/, ''))}/USDT</td><td class="${position.side === 'LONG' ? 'up' : 'down'}">${position.side}</td><td>${priceText(position.entry)}</td><td>${priceText(position.lastPrice)}</td><td class="up">${position.target ? priceText(position.target) : '—'}</td><td class="down">${position.stop && position.stop !== position.liq ? priceText(position.stop) : '—'}</td><td>${Number(position.qty).toFixed(6)}</td><td>${position.leverage}x · ${safe(position.marginMode || 'ISOLATED')}</td><td class="${pnl >= 0 ? 'up' : 'down'}">${signed(pnl)} USDT</td><td class="${roe >= 0 ? 'up' : 'down'}">${signed(roe)}%</td><td><button class="trade-close" type="button" data-close-position="${safe(position.id)}">시장가 청산</button></td></tr>`;
       }).join('') + pending;
-      if (!positions.length && !pending) body.innerHTML = '<tr><td colspan="11" class="trade-empty">열린 포지션이 없습니다. 주문 패널에서 바로 모의 주문을 시작하세요.</td></tr>';
+      if (!positions.length && !pending) body.innerHTML = '<tr><td colspan="11" class="trade-empty">열린 포지션이 없습니다. 주문 화면에서 바로 모의 주문을 시작하세요.</td></tr>';
     } else {
       head.innerHTML = '<tr><th>체결 시각</th><th>계약</th><th>방향</th><th>진입가</th><th>청산가</th><th>레버리지</th><th>실현 PnL</th><th>수익률</th><th>결과</th></tr>';
       const trades = snapshot.trades;
@@ -789,6 +836,8 @@
         return `<tr><td>${safe(Number.isNaN(at.getTime()) ? '—' : at.toLocaleString())}</td><td>${safe(trade.symbol.replace(/USDT$/, ''))}/USDT</td><td>${trade.side}</td><td>${priceText(trade.entry)}</td><td>${priceText(trade.exit)}</td><td>${trade.leverage}x</td><td class="${trade.pnl >= 0 ? 'up' : 'down'}">${signed(trade.pnl)} USDT</td><td class="${trade.roePct >= 0 ? 'up' : 'down'}">${signed(trade.roePct)}%</td><td>${safe(trade.reason)}</td></tr>`;
       }).join('') || '<tr><td colspan="9" class="trade-empty">아직 체결 내역이 없습니다.</td></tr>';
     }
+    const table = $('.trade-table');
+    if (table) table.classList.toggle('is-empty', !!body.querySelector('.trade-empty'));
   }
 
   function average(index, period, exponential) {
@@ -969,6 +1018,7 @@
     $('#trade-price').textContent = '—';
     $('#trade-change').textContent = '—';
     if (select && base) select.value = base;
+    setMobileView('chart');
     setView('trading');
   }
 

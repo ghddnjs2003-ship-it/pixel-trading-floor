@@ -606,6 +606,8 @@
     button.type = 'button';
     button.className = 'pro-stats-btn';
     button.textContent = '📊 매매 성적';
+    button.setAttribute('aria-label', '모의 매매 성적표 열기');
+    button.title = '모의 매매 성적표 — 승률 · 손익비 · 수익 곡선';
     button.setAttribute('aria-haspopup', 'dialog');
     live.parentNode.insertBefore(button, live);
 
