@@ -300,7 +300,9 @@
     page.setAttribute('aria-label', '시장 대시보드');
     page.innerHTML = `
       <div id="dash-mstrip" role="region" aria-label="글로벌 시황 한 줄 요약">
-        ${CHIP_KEYS.map((k) => `<span class="dash-chip" data-k="${k}"><span class="dc-lbl">${CHIP_LABEL[k] || k}</span><b class="dc-val">—</b><em class="dc-chg flat"></em></span>`).join('')}
+        <div class="mstrip-scroll">
+          ${CHIP_KEYS.map((k) => `<span class="dash-chip" data-k="${k}"><span class="dc-lbl">${CHIP_LABEL[k] || k}</span><b class="dc-val">—</b><em class="dc-chg flat"></em></span>`).join('')}
+        </div>
         <button type="button" class="dash-chip-more" aria-expanded="false">전체 ▾</button>
       </div>
       <div class="dash-wrap">

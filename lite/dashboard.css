@@ -272,16 +272,20 @@ html.dash-view #dash-page {
   .dash-wrap { display: flex; flex-direction: column; padding: 10px 10px 18px; gap: 10px; }
 
   #dash-mstrip {
-    display: flex; align-items: center; gap: 0; flex: none; padding: 0 2px 2px;
+    display: flex; align-items: center; gap: 6px; flex: none; padding: 0 2px 2px;
+  }
+  /* 칩은 자기 영역 안에서만 가로로 넘기고, '전체 ▾' 버튼은 그 바깥에 둔다 — 겹치거나 잘리지 않는다 */
+  #dash-mstrip .mstrip-scroll {
+    display: flex; align-items: center; gap: 0; flex: 1 1 auto; min-width: 0;
     overflow-x: auto; scrollbar-width: none;
   }
-  #dash-mstrip::-webkit-scrollbar { display: none; }
+  #dash-mstrip .mstrip-scroll::-webkit-scrollbar { display: none; }
   #dash-mstrip.open { flex-wrap: wrap; row-gap: 4px; padding-bottom: 6px; }
+  #dash-mstrip.open .mstrip-scroll { flex: 1 1 100%; flex-wrap: wrap; row-gap: 4px; overflow: visible; }
   .dash-chip { border-right: 0; padding: 4px 8px; background: #10151e; border: 1px solid #263143; border-radius: 5px; margin-right: 5px; }
   #dash-mstrip .dash-chip-more {
-    flex: none; margin-left: auto; font: inherit; font-size: 10px; color: #9fb0c9;
+    flex: none; font: inherit; font-size: 10px; color: #9fb0c9;
     background: #182031; border: 1px solid #2c3950; border-radius: 5px; padding: 5px 9px; cursor: pointer;
-    position: sticky; right: 0;  /* 칩이 넘쳐도 '전체 ▾'는 오른쪽 끝에 붙어 항상 보이게 */
   }
   #dash-mstrip.open .dash-chip { margin-bottom: 0; }
   #dash-mstrip .dash-chip[data-k="es"], #dash-mstrip .dash-chip[data-k="fx"], #dash-mstrip .dash-chip[data-k="btcd"] { display: none; }
