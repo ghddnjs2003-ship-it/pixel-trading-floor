@@ -459,7 +459,7 @@
     if (seq !== loadSummary.seq) { state.summaryLoading = false; return; }
 
     const data = { symbol, at: Date.now() };
-    let problems = [];
+    const problems = [];
     if (tick.status === 'fulfilled') {
       const row = (tick.value.list || [])[0];
       if (row) {
@@ -470,8 +470,8 @@
         data.intervalHours = num(row.fundingIntervalHour) || 8;
         data.oiUsd = num(row.openInterestValue);
         if (data.oiUsd == null && num(row.openInterest) != null && data.price) data.oiUsd = num(row.openInterest) * data.price;
-      } else problems.push('tickers');
-    } else problems.push('tickers');
+      } else problems.push(`tickers(빈 응답)`);
+    } else problems.push(`tickers(${tick.reason && tick.reason.message ? tick.reason.message : '실패'})`);
 
     if (oi.status === 'fulfilled') {
       const rows = (oi.value.list || []).map((r) => ({ v: num(r.openInterest), t: num(r.timestamp) }))
@@ -482,6 +482,7 @@
 
     const ratio = await loadRatio(symbol);
     if (ratio) { data.longShare = ratio; } else problems.push('account-ratio');
+    data.problems = problems;
 
     if (data.symbol === state.symbol) {
       state.summary = data;
@@ -552,6 +553,7 @@
 
     const note = $('#dash-flow-note');
     if (state.summaryError) { note.textContent = `${state.summaryError} · 30초 뒤 다시`; note.className = 'dash-flow-note is-error'; }
+    else if (d.problems && d.problems.length) { note.textContent = `${d.problems.join(' · ')} · 다음 갱신에 다시`; note.className = 'dash-flow-note is-error'; }
     else {
       note.textContent = `Bybit 선형 무기한 · ${d.intervalHours || 8}시간 펀딩 · 30초 갱신 · 롱/숏 계정 기준`;
       note.className = 'dash-flow-note';
