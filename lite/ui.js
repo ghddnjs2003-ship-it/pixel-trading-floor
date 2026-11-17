@@ -38,7 +38,6 @@
     // 휴대폰은 레일이 옆으로 밀리므로 남은 횟수·자료실 링크를 앞에 둔다
     box.innerHTML = '<button type="button" id="lite-category">데모 트레이딩</button><span class="why">*실시간 시세 · 모의 주문</span>'
       + (quota ? '<em id="lite-left"></em>' : '')
-      + (embed ? '' : '<button type="button" id="lite-intro" disabled aria-disabled="true" title="준비 중">소개</button>')
       + '<button type="button" id="lite-hist-btn">📋 매매 내역</button>'
       + '<button type="button" id="lite-reset">계좌 초기화</button>';
     const gap = rail.querySelector('.rail-gap');

@@ -738,6 +738,24 @@
   window.LiteWhale = {
     setActive,
     refresh: () => { loadCalendar(true); poll(true); },
+    /* 시장 대시보드 요약 카드용 읽기 전용 스냅숏 — 값을 지어내지 않게 실제 상태만 넘긴다 */
+    snapshot: () => ({
+      rows: state.order.slice(0, 6).map((id) => {
+        const r = state.rows.get(id);
+        if (!r) return null;
+        const from = party(r.from);
+        const to = party(r.to);
+        return { ts: r.ts, usd: r.usd, from: from.name, fromKind: from.kind, to: to.name, toKind: to.kind };
+      }).filter(Boolean),
+      stat: stats(),
+      calendar: state.calendar && Array.isArray(state.calendar.events)
+        ? state.calendar.events.map((e) => ({ atMs: e.atMs, date: e.date, time: e.time, impact: e.impact, title: e.title, titleEn: e.titleEn, forecast: e.forecast, previous: e.previous }))
+        : null,
+      calError: state.calError,
+      error: state.error,
+      fetching: state.fetching,
+      lastOkAt: state.lastOkAt,
+    }),
     debug: () => ({
       active: state.active,
       rows: state.order.length,
