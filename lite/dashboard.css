@@ -278,10 +278,13 @@ html.dash-view #dash-page {
   #dash-mstrip .mstrip-scroll {
     display: flex; align-items: center; gap: 0; flex: 1 1 auto; min-width: 0;
     overflow-x: auto; scrollbar-width: none;
+    /* 칩이 더 있다는 표시 — 오른쪽 끝을 살짝 흐리게 */
+    -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 14px), transparent 100%);
+    mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 14px), transparent 100%);
   }
   #dash-mstrip .mstrip-scroll::-webkit-scrollbar { display: none; }
   #dash-mstrip.open { flex-wrap: wrap; row-gap: 4px; padding-bottom: 6px; }
-  #dash-mstrip.open .mstrip-scroll { flex: 1 1 100%; flex-wrap: wrap; row-gap: 4px; overflow: visible; }
+  #dash-mstrip.open .mstrip-scroll { flex: 1 1 100%; flex-wrap: wrap; row-gap: 4px; overflow: visible; -webkit-mask-image: none; mask-image: none; }
   .dash-chip { border-right: 0; padding: 4px 8px; background: #10151e; border: 1px solid #263143; border-radius: 5px; margin-right: 5px; }
   #dash-mstrip .dash-chip-more {
     flex: none; font: inherit; font-size: 10px; color: #9fb0c9;
