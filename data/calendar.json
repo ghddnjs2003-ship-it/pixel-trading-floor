@@ -1,5 +1,5 @@
 {
- "updatedAt": "2026-11-17T07:49:13+09:00",
+ "updatedAt": "2026-11-18T07:29:04+09:00",
  "source": "ForexFactory weekly calendar",
  "sourceUrl": "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
  "timezone": "Asia/Seoul",
@@ -63,7 +63,7 @@
    "impactStars": 2,
    "title": "필라델피아 연은 제조업지수",
    "titleEn": "Philly Fed Manufacturing Index",
-   "forecast": "19.2",
+   "forecast": "20.6",
    "previous": "20.9"
   },
   {
@@ -75,7 +75,7 @@
    "impactStars": 2,
    "title": "신규 실업수당 청구건수",
    "titleEn": "Unemployment Claims",
-   "forecast": "199K",
+   "forecast": "198K",
    "previous": "200K"
   },
   {
@@ -87,7 +87,7 @@
    "impactStars": 2,
    "title": "미시간대 소비자심리지수 (수정)",
    "titleEn": "Revised UoM Consumer Sentiment",
-   "forecast": "52.1",
+   "forecast": "51.7",
    "previous": "51.0"
   },
   {
