@@ -452,33 +452,40 @@
     state.summaryLoading = true;
     const symbol = state.symbol;
     const seq = ++loadSummary.seq;
-    const [tick, oi] = await Promise.allSettled([
-      getJSON(`${API}/tickers?category=linear&symbol=${symbol}`),
-      getJSON(`${API}/open-interest?category=linear&symbol=${symbol}&intervalTime=1h&limit=24`),
-    ]);
+
+    /* 1차 원: 스캐너가 이미 받아 둔 전체 티커 스냅숏 (종목 단건 요청이 빈 목록을 줄 때가 있어 같은 데이터를 재활용한다)
+       스캐너가 아직 못 받았으면 종목 단건 요청으로 물러난다 */
+    let row = state.scan.bySymbol.get(symbol) || null;
+    if (!row) {
+      try {
+        const single = await getJSON(`${API}/tickers?category=linear&symbol=${symbol}`);
+        row = (single.list || [])[0] || null;
+      } catch (e) { row = null; }
+    }
     if (seq !== loadSummary.seq) { state.summaryLoading = false; return; }
 
     const data = { symbol, at: Date.now() };
     const problems = [];
-    if (tick.status === 'fulfilled') {
-      const row = (tick.value.list || [])[0];
-      if (row) {
-        data.price = num(row.lastPrice);
-        data.changePct = num(row.price24hPcnt) == null ? null : num(row.price24hPcnt) * 100;
-        data.turnover = num(row.turnover24h);
-        data.funding = num(row.fundingRate) == null ? null : num(row.fundingRate) * 100;
-        data.intervalHours = num(row.fundingIntervalHour) || 8;
-        data.oiUsd = num(row.openInterestValue);
-        if (data.oiUsd == null && num(row.openInterest) != null && data.price) data.oiUsd = num(row.openInterest) * data.price;
-      } else problems.push(`tickers(빈 응답)`);
-    } else problems.push(`tickers(${tick.reason && tick.reason.message ? tick.reason.message : '실패'})`);
+    if (row) {
+      data.price = num(row.price != null ? row.price : row.lastPrice);
+      const pctRaw = row.pct != null ? row.pct : num(row.price24hPcnt) == null ? null : num(row.price24hPcnt) * 100;
+      data.changePct = pctRaw;
+      data.turnover = num(row.turnover);
+      data.funding = row.funding != null ? row.funding
+        : (num(row.fundingRate) == null ? null : num(row.fundingRate) * 100);
+      data.intervalHours = row.intervalHours || num(row.fundingIntervalHour) || 8;
+      data.oiUsd = row.oiUsd != null ? row.oiUsd : num(row.openInterestValue);
+      if (data.oiUsd == null && num(row.openInterest) != null && data.price) data.oiUsd = num(row.openInterest) * data.price;
+    } else problems.push('tickers(스캐너 대기 중)');
 
-    if (oi.status === 'fulfilled') {
-      const rows = (oi.value.list || []).map((r) => ({ v: num(r.openInterest), t: num(r.timestamp) }))
+    /* OI 24시간 흐름 — 실패해도 OI 규모는 위 티커 값으로 계속 보여 준다 */
+    try {
+      const oi = await getJSON(`${API}/open-interest?category=linear&symbol=${symbol}&intervalTime=1h&limit=24`);
+      const rows = (oi.list || []).map((r) => ({ v: num(r.openInterest), t: num(r.timestamp) }))
         .filter((r) => r.v != null && r.v > 0 && r.t != null).sort((a, b) => a.t - b.t);
       if (rows.length >= 2) data.oiChange = ((rows[rows.length - 1].v - rows[0].v) / rows[0].v) * 100;
       if (data.oiUsd == null && rows.length && data.price) data.oiUsd = rows[rows.length - 1].v * data.price;
-    }
+    } catch (e) { /* OI 흐름이 없어도 규모는 표시된다 */ }
 
     const ratio = await loadRatio(symbol);
     if (ratio) { data.longShare = ratio; } else problems.push('account-ratio');
@@ -494,10 +501,18 @@
     }
   }
 
-  // 롱/숏 계정 비율 — 실패하면 화면은 '—'를 유지한다
+  /* 롱/숏 계정 비율 — 계정 기준(account-ratio)이 비어 오면 종목 기준(long-short-ratio)으로 물러난다.
+     둘 다 값이 없으면 화면은 '—'를 유지한다 */
   async function loadRatio(symbol) {
     try {
       const body = await getJSON(`${API}/account-ratio?category=linear&symbol=${symbol}&period=1h&limit=1`);
+      const row = (body.list || [])[0];
+      const buy = num(row && row.buyRatio);
+      const sell = num(row && row.sellRatio);
+      if (buy != null && sell != null && buy + sell > 0) return buy / (buy + sell);
+    } catch (e) { /* 다음 시도로 넘어간다 */ }
+    try {
+      const body = await getJSON(`${API}/long-short-ratio?category=linear&symbol=${symbol}&period=1h&limit=1`);
       const row = (body.list || [])[0];
       const buy = num(row && row.buyRatio);
       const sell = num(row && row.sellRatio);
@@ -799,6 +814,10 @@
           pct: num(raw.price24hPcnt) == null ? null : num(raw.price24hPcnt) * 100,
           turnover: num(raw.turnover24h) || 0,
           prevPrice: price,
+          funding: num(raw.fundingRate) == null ? null : num(raw.fundingRate) * 100,
+          intervalHours: num(raw.fundingIntervalHour) || 8,
+          oiUsd: num(raw.openInterestValue) != null ? num(raw.openInterestValue)
+            : (num(raw.openInterest) != null && price ? num(raw.openInterest) * price : null),
         };
         rows.push(row);
         bySymbol.set(symbol, row);
@@ -808,6 +827,8 @@
       state.scan.bySymbol = bySymbol;
       state.scan.at = Date.now();
       state.scan.error = '';
+      // 스캐너 스냅숏이 도착하면 요약 카드도 즉시 채운다 (30초 타이머를 기다리지 않게)
+      if (!state.summary || state.summary.funding == null) loadSummary();
     } catch (error) {
       if (seq !== loadScanner.seq) return;
       state.scan.error = `바이비트 시세를 받지 못했습니다 (${error && error.message ? error.message : error}) · 잠시 뒤 다시`;
