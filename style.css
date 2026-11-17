@@ -1834,7 +1834,6 @@ body.vertical .trading-body { flex-direction: row; }
 body.vertical #decision-panel { order: 0; }
 
 /* --- 채찍 모드 (OpenWhip 오마주 — 물리 밧줄 오버레이) --- */
-#whip-btn.on { background: var(--red); color: #fff; }
 /* 밧줄이 곧 커서다 — 채찍 든 동안 네이티브 커서를 숨긴다 */
 body.whip-mode, body.whip-mode * { cursor: none !important; }
 body.whip-mode .bubble { pointer-events: none; } /* 채찍 든 동안 모달 클릭 방지 */

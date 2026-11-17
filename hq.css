@@ -24,14 +24,6 @@
   padding: 3px 8px; cursor: pointer; white-space: nowrap;
 }
 #auto-chip .ac-dot { width: 8px; height: 8px; background: #555; display: inline-block; }
-/* 채찍 칩 — 레일이 안 보이는 휴대폰·녹화 모드에서만 상단에 둔다 */
-#whip-chip {
-  display: none; font-family: inherit; font-size: 13px; line-height: 1;
-  background: #1c1c28; color: #fff; border: 2px solid #000; box-shadow: 2px 2px 0 var(--shadow);
-  padding: 3px 8px; cursor: pointer;
-}
-html.m #whip-chip, html.rec #whip-chip { display: inline-block; }
-#whip-chip.on { background: var(--red); color: #fff; }
 /* 채찍 든 동안 손가락 드래그가 스크롤·확대로 새지 않게 */
 body.whip-mode, body.whip-mode * { touch-action: none; }
 /* 자동 운영 한 번에 켜기/끄기 */
@@ -461,7 +453,6 @@ html.m .crt { opacity: .035; }
 html.m #topbar { flex-wrap: wrap; gap: 4px 6px; padding: 5px 8px; border-bottom-width: 2px; }
 html.m #logo { font-size: 12px; letter-spacing: 0; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; }
 html.m #auto-chip { font-size: 10px; padding: 2px 6px; }
-html.m #whip-chip { font-size: 12px; padding: 2px 7px; }
 html.m #clocks { display: none; }
 html.m #controls { width: 100%; gap: 4px; order: 3; }
 html.m #symbol-input { flex: 1; min-width: 0; width: auto; font-size: 12px; padding: 4px 6px; }

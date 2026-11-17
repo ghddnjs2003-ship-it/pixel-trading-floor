@@ -608,22 +608,11 @@ const Stage = (() => {
     sfxCrack(true);
   }
 
+  /* 상단 [채찍] 버튼은 뺐다(대표 요청 2026-11-17) — 남은 길은 W 키와 ESC 뿐이다 */
   function whipToggle(force) {
     whipMode = typeof force === 'boolean' ? force : !whipMode;
     document.body.classList.toggle('whip-mode', whipMode);
     if (whipMode && !STILL) ropeStart(); else ropeStop();
-    const b = qs('#whip-btn');
-    if (b) {
-      b.classList.toggle('on', whipMode);
-      b.setAttribute('aria-pressed', whipMode ? 'true' : 'false');
-      b.textContent = whipMode ? '〰 채찍 내려놓기' : '〰 채찍';
-    }
-    const chip = qs('#whip-chip');
-    if (chip) {
-      chip.classList.toggle('on', whipMode);
-      chip.setAttribute('aria-pressed', whipMode ? 'true' : 'false');
-      chip.textContent = whipMode ? '〰 ✕' : '〰';
-    }
   }
 
   /* 찰싹 사운드: 오실레이터 삑- 이 아니라 진짜 채찍 크랙처럼
@@ -717,13 +706,9 @@ const Stage = (() => {
   }
 
   function initWhip() {
-    const b = qs('#whip-btn');
-    if (b) b.addEventListener('click', () => whipToggle());
-    const chip = qs('#whip-chip');
-    if (chip) chip.addEventListener('click', () => whipToggle());
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && whipMode) whipToggle(false);
-      // W = 채찍 들기/내려놓기 (녹화 모드처럼 버튼이 숨어 있어도). 입력창에서는 무시
+      // W = 채찍 들기/내려놓기 (버튼이 없어도 키로는 남겨 둔다). 입력창에서는 무시
       const t = e.target instanceof Element ? e.target : null;
       if ((e.key === 'w' || e.key === 'W' || e.key === 'ㅈ') && !e.ctrlKey && !e.metaKey && !e.altKey
           && !(t && t.closest('input, textarea, select, [contenteditable]'))) {

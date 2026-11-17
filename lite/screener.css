@@ -16,7 +16,7 @@ html.screener-view #logo {
   flex: 0 1 auto; min-width: 0; overflow: hidden; color: #dce5f2; font-family: Arial, 'Segoe UI', sans-serif;
   font-size: 13px; letter-spacing: 0; text-overflow: ellipsis; text-shadow: none; white-space: nowrap;
 }
-html.screener-view #auto-chip, html.screener-view #whip-chip, html.screener-view #controls, html.screener-view #clocks { display: none !important; }
+html.screener-view #auto-chip, html.screener-view #controls, html.screener-view #clocks { display: none !important; }
 html.screener-view #view-switch { margin-left: auto; }
 html.screener-view #view-switch button { font-family: Arial, 'Segoe UI', sans-serif; border-radius: 4px; }
 html.screener-view #view-switch button.active { color: #c9f7e5; background: #15362d; border-color: #2a715b; }

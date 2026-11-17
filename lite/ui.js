@@ -2,7 +2,7 @@
    · 상단 레일: 데모 트레이딩 주문 · 모의 계좌 초기화 (횟수 제한 없음)
      배율·청산 고정 표시는 뺐다(대표 요청 2026-10-07) — 포지션별 청산 위험은 GUARD 보고(life.js)가 말한다
    · 가상 포지션 패널 아래 "매매 내역"(청산된 거래 목록)
-     (소개 페이지 속 화면 ?embed=1 이면 '소개' 링크는 뺀다 — 페이지 안에 페이지가 뜨지 않게)
+     (소개 페이지 속 화면 ?embed=1 이면 '소개' 버튼은 뺀다 — 페이지 안에 페이지가 뜨지 않게)
    · 첫 방문 안내(한 번만): 모드 고르기(알고리즘=중장기 · 스캘핑=단타) → ▶ ANALYZE 분석하기
    · 무료 분석을 다 쓰면 ANALYZE 대신 안내 창(모의 계좌 성적 + 자료실)
    · 수익표(챌린지 실계좌 기록)는 실제 버전 기능이라 전광판 클릭을 안내로 바꾼다
@@ -38,7 +38,7 @@
     // 휴대폰은 레일이 옆으로 밀리므로 남은 횟수·자료실 링크를 앞에 둔다
     box.innerHTML = '<button type="button" id="lite-category">데모 트레이딩</button><span class="why">*실시간 시세 · 모의 주문</span>'
       + (quota ? '<em id="lite-left"></em>' : '')
-      + (embed ? '' : `<a href="${esc(cfg.landingUrl || '../')}">소개</a>`)
+      + (embed ? '' : '<button type="button" id="lite-intro" disabled aria-disabled="true" title="준비 중">소개</button>')
       + '<button type="button" id="lite-hist-btn">📋 매매 내역</button>'
       + '<button type="button" id="lite-reset">계좌 초기화</button>';
     const gap = rail.querySelector('.rail-gap');

@@ -13,7 +13,9 @@ html.m #lite-ribbon { order: -1; flex: none; }
   font: inherit; font-size: 10px; letter-spacing: .5px; color: #cfcfe0; background: #16162a;
   border: 2px solid #000; box-shadow: 2px 2px 0 #000; padding: 3px 8px; text-decoration: none; cursor: pointer;
 }
-#lite-ribbon a:hover, #lite-ribbon button:hover { background: #e8c84a; color: #1a1408; }
+#lite-ribbon a:hover, #lite-ribbon button:hover:not(:disabled) { background: #e8c84a; color: #1a1408; }
+/* 비활성 버튼 — 상단 [트레이딩] 탭처럼 눌리지 않게 (소개) */
+#lite-ribbon button:disabled { color: #687284; background: #161a21; border-color: #262d38; box-shadow: 2px 2px 0 #000; cursor: not-allowed; opacity: .5; }
 #lite-ribbon button#lite-category { background: #e8c84a; color: #1a1408; font-weight: bold; }
 html.m #lite-ribbon .why { display: none; }
 html.m #lite-ribbon a, html.m #lite-ribbon button, html.m #lite-ribbon em { padding: 2px 6px; flex: none; }
@@ -149,7 +151,7 @@ html.m #chart { height: 92px !important; }
    한 화면에 눌러 담는 대신 위에서 아래로 쌓아 스크롤한다(낮은 화면에서 잔고판이 자막·판정을 덮던 문제).
    사무실 칸(#floor)은 방 위치가 %라서 높이를 정해 둔다 */
 html.shell #logo { display: none; }
-html.m.shell #whip-chip { margin-left: auto; }
+html.m.shell #view-switch { margin-left: auto; }
 html.m.shell, html.m.shell body { height: auto; overflow-x: hidden; overflow-y: auto; }
 html.m.shell #app { height: auto; min-height: 100vh; min-height: 100dvh; overflow: visible; }
 html.m.shell #stage { flex: 1 0 auto; overflow: visible; }
@@ -174,7 +176,7 @@ html.trading-view #topbar {
   gap: 14px; background: #10151e; border-bottom: 1px solid #273143;
 }
 html.trading-view #logo { font-family: inherit; font-size: 13px; letter-spacing: 0; color: #dce5f2; text-shadow: none; }
-html.trading-view #auto-chip, html.trading-view #whip-chip, html.trading-view #controls, html.trading-view #clocks { display: none !important; }
+html.trading-view #auto-chip, html.trading-view #controls, html.trading-view #clocks { display: none !important; }
 html.trading-view #view-switch { margin-left: auto; }
 html.trading-view #view-switch button { font-family: Arial, sans-serif; border-radius: 4px; }
 html.trading-view #view-switch button.active { color: #c9f7e5; background: #15362d; border-color: #2a715b; }
@@ -421,8 +423,7 @@ html.trading-view #trade-page { position: fixed; inset: 54px 0 0; z-index: 10000
   html.m:not(.trading-view):not(.shell) #controls { flex-wrap: wrap; }
   html.m:not(.trading-view):not(.shell) #symbol-input { min-height: 42px; font-size: 16px; }
   html.m:not(.trading-view):not(.shell) #mode-toggle .mode-btn,
-  html.m:not(.trading-view):not(.shell) #analyze-btn,
-  html.m:not(.trading-view):not(.shell) #whip-chip { min-height: 42px; padding: 8px; font-size: 12px; }
+  html.m:not(.trading-view):not(.shell) #analyze-btn { min-height: 42px; padding: 8px; font-size: 12px; }
   html.m:not(.trading-view):not(.shell) #v2-rail { min-height: 46px; padding: 5px 8px; }
   html.m:not(.trading-view):not(.shell) #v2-rail .rail-btn,
   html.m:not(.trading-view):not(.shell) #lite-ribbon a,
