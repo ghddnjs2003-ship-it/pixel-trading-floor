@@ -307,7 +307,7 @@ html.trading-view #trade-page { position: fixed; inset: 54px 0 0; z-index: 10000
 .trade-order-summary b { color: #dce4ef; font-weight: 500; text-align: right; }
 #trade-order-error { min-height: 14px; color: #ee9b78; font-size: 10px; line-height: 1.4; }
 /* 주문 버튼은 창 높이가 모자라도 늘 주문 패널 아래에 붙어 있다 */
-.trade-actions { position: sticky; bottom: 0; z-index: 2; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; background: #10151e; }
+.trade-actions { position: sticky; bottom: 0; z-index: 2; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; background: #10151e; box-shadow: 0 -8px 12px rgba(11, 14, 19, .88); }
 .trade-actions button { padding: 12px 5px; border: 0; border-radius: 4px; color: #fff; cursor: pointer; font-weight: 700; font-size: 11px; }
 .trade-long { background: #16875f; }
 .trade-actions button.recommended { outline: 2px solid rgba(226,232,240,.72); outline-offset: 2px; }
@@ -387,10 +387,7 @@ html.trading-view #trade-page { position: fixed; inset: 54px 0 0; z-index: 10000
   .trade-order-types button { padding: 7px; }
   .trade-order-summary { grid-template-columns: 1fr auto; gap: 4px 8px; padding: 5px 0; }
   /* 매수·매도 버튼은 늘 화면 아래에 붙어 있다 — 계산기를 내려도 보인다 */
-  .trade-actions {
-    position: sticky; bottom: 0; z-index: 2; gap: 8px; padding: 7px 0 6px;
-    background: #10151e; box-shadow: 0 -8px 12px rgba(11, 14, 19, .92);
-  }
+  .trade-actions { gap: 8px; padding: 7px 0 6px; }
   .trade-actions button { min-height: 46px; padding: 10px 6px; font-size: 12px; }
   .trade-disclaimer { font-size: 8px; }
 
