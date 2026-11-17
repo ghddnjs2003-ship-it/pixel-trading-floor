@@ -47,7 +47,7 @@
   const nav = document.createElement('nav');
   nav.id = 'view-switch';
   nav.setAttribute('aria-label', '화면 전환');
-  nav.innerHTML = '<button type="button" data-view="office" class="active">사무실</button><button type="button" data-view="screener">스크리너</button><button type="button" data-view="whale" title="실시간 고래 입출금 · 이번 주 경제 일정">고래·일정</button><button type="button" data-view="trading" title="데모 트레이딩 — 실시간 시세 · 모의 주문">트레이딩</button>';
+  nav.innerHTML = '<button type="button" data-view="office" class="active">사무실</button><button type="button" data-view="screener">스크리너</button><button type="button" data-view="whale" title="실시간 고래 입출금 · 이번 주 경제 일정">고래·일정</button><button type="button" data-view="trading" disabled aria-disabled="true" title="실전 연동 예정">트레이딩</button>';
   topbar.insertBefore(nav, $('#controls'));
   nav.addEventListener('click', (event) => {
     const button = event.target.closest('[data-view]');
