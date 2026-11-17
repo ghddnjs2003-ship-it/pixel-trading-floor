@@ -508,16 +508,17 @@
      종목 기준(long-short-ratio)으로도 물러난다. 그래도 없으면 화면은 '—'를 유지하고 30초 주기로 다시 시도한다 */
   async function loadRatio(symbol) {
     loadRatio.lastError = '';
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    const periods = ['1h', '1h', '5min'];   // Bybit가 이따금 200에 빈 목록을 준다 — 기간을 바꿔가며 몇 번 다시 부른다
+    for (let attempt = 0; attempt < periods.length; attempt += 1) {
       try {
-        const body = await getJSON(`${API}/account-ratio?category=linear&symbol=${symbol}&period=1h&limit=1`);
+        const body = await getJSON(`${API}/account-ratio?category=linear&symbol=${symbol}&period=${periods[attempt]}&limit=1`);
         const row = (body.list || [])[0];
         const buy = num(row && row.buyRatio);
         const sell = num(row && row.sellRatio);
         if (buy != null && sell != null && buy + sell > 0) return buy / (buy + sell);
         loadRatio.lastError = `계정기준 빈 목록(list=${(body.list || []).length})`;
       } catch (e) { loadRatio.lastError = `계정기준 ${e && e.name ? e.name : '실패'}`; }
-      if (attempt < 2) await sleep(1500);
+      if (attempt < periods.length - 1) await sleep(1500);
     }
     try {
       const body = await getJSON(`${API}/long-short-ratio?category=linear&symbol=${symbol}&period=1h&limit=1`);
