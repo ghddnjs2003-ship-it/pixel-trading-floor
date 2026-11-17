@@ -25,8 +25,8 @@
   const MAIN_COINS = ['BTC', 'ETH', 'SOL', 'XRP', 'DOGE'];
   const GLYPHS = { BTC: '₿', ETH: 'Ξ', SOL: '◎', XRP: '✕', DOGE: 'Ð', BNB: 'B', LTC: 'Ł', ADA: '₳', DOT: '●', TRX: 'T', LINK: 'L' };
   const GLYPH_BG = { BTC: '#f7931a', ETH: '#627eea', SOL: '#14f195', XRP: '#23292f', DOGE: '#c2a633', BNB: '#f0b90b' };
-  const CHIP_KEYS = ['nq', 'dxy', 'fx', 'kimchi', 'fng'];
-  const CHIP_LABEL = { nq: 'NQ', dxy: 'DXY', fx: '원/달러', kimchi: '김프', fng: '공포지수', es: 'ES', btcd: 'BTC.D' };
+  const CHIP_KEYS = ['nq', 'es', 'dxy', 'fx', 'kimchi', 'btcd', 'fng'];
+  const CHIP_LABEL = { nq: 'NQ', es: 'ES', dxy: 'DXY', fx: '원/달러', kimchi: '김프', btcd: 'BTC.D', fng: '공포지수' };
 
   const CHART_MS = 5000;      // 캔들 보충 (현재가도 이 값으로 따라 움직인다)
   const FLOW_MS = 30000;      // 수급 3대장
@@ -42,8 +42,14 @@
     levels: { support: null, resistance: null, basis: '' },
     scan: { rows: [], bySymbol: new Map(), at: 0, loading: false, error: '', expanded: false, query: '', sort: 'turnover', dir: -1, lastPaint: '' },
     whaleAt: 0,
-    timers: { chart: 0, flow: 0, scan: 0, whale: 0, chips: 0 },
+    indicators: null,
+    timers: { chart: 0, flow: 0, scan: 0, whale: 0, chips: 0, liqPaint: 0, taker: 0 },
   };
+
+  // 요청 번호표 — 오래된 응답은 버린다(0에서 시작해야 NaN이 안 된다)
+  loadCandles.seq = 0;
+  loadSummary.seq = 0;
+  loadScanner.seq = 0;
 
   /* ---------------------------------------------------------------- 표기 */
 
@@ -100,6 +106,178 @@
     }
   }
 
+  /* ---------------------------------------------------------------- 기술적 지표 (실제 캔들 기반 계산) */
+
+  function smaValue(candles, period) {
+    if (candles.length < period) return null;
+    let sum = 0;
+    for (let i = candles.length - period; i < candles.length; i += 1) sum += candles[i].c;
+    return sum / period;
+  }
+
+  function rsiValue(candles, period = 14) {
+    if (candles.length < period + 1) return null;
+    let gain = 0;
+    let loss = 0;
+    for (let i = candles.length - period; i < candles.length; i += 1) {
+      const change = candles[i].c - candles[i - 1].c;
+      if (change > 0) gain += change; else loss -= change;
+    }
+    if (loss === 0) return gain === 0 ? 50 : 100;
+    return 100 - 100 / (1 + gain / loss);
+  }
+
+  // MA20·60·120 배열 — 정배열(단기가 위) 상승, 역배열 하락, 그 외 혼조
+  function maTrend(candles) {
+    const ma20 = smaValue(candles, 20);
+    const ma60 = smaValue(candles, 60);
+    const ma120 = smaValue(candles, 120);
+    if (ma20 == null || ma60 == null || ma120 == null) return null;
+    if (ma20 > ma60 && ma60 > ma120) return { state: 'up', label: '정배열 · 상승추세' };
+    if (ma20 < ma60 && ma60 < ma120) return { state: 'down', label: '역배열 · 하락추세' };
+    return { state: 'flat', label: '혼조 · 횡보' };
+  }
+
+  function paintIndicators() {
+    const ind = state.indicators;
+    const rsiEl = $('#dash-rsi');
+    const rsiBadge = $('#dash-rsi-badge');
+    const maEl = $('#dash-ma');
+    const maBadge = $('#dash-ma-badge');
+    if (!rsiEl || !maEl) return;
+    if (!ind) {
+      rsiEl.textContent = '—';
+      rsiBadge.textContent = '봉을 더 받는 중';
+      rsiBadge.className = '';
+      maEl.textContent = '—';
+      maBadge.textContent = '봉을 더 받는 중';
+      maBadge.className = '';
+      return;
+    }
+    rsiEl.textContent = ind.rsi == null ? '—' : ind.rsi.toFixed(1);
+    if (ind.rsi == null) { rsiBadge.textContent = '—'; rsiBadge.className = ''; }
+    else if (ind.rsi >= 70) { rsiBadge.textContent = '과매수 ≥70'; rsiBadge.className = 'warn'; }
+    else if (ind.rsi <= 30) { rsiBadge.textContent = '과매도 ≤30'; rsiBadge.className = 'safe'; }
+    else { rsiBadge.textContent = '중립'; rsiBadge.className = ''; }
+
+    if (!ind.trend) { maEl.textContent = '—'; maBadge.textContent = '데이터 120봉 미만'; maBadge.className = ''; return; }
+    maEl.textContent = `${priceText(ind.ma20)} / ${priceText(ind.ma60)} / ${priceText(ind.ma120)}`;
+    maBadge.textContent = ind.trend.label;
+    maBadge.className = ind.trend.state;
+  }
+
+  /* ---------------------------------------------------------------- 강제청산 스트림 · 테이커 수급 (바이낸스 공개) */
+
+  const BINANCE_WS = 'wss://fstream.binance.com/ws/!forceOrder@arr';
+  const BINANCE_TAKER = 'https://fapi.binance.com/futures/data/takerlongshortRatio';
+  const LIQ_WINDOW_MS = 10 * 60000;   // 최근 10분 집계
+  const LIQ_KEEP = 300;               // 이벤트 최대 보관
+
+  const liq = {
+    ws: null, wsState: 'idle', retryTimer: 0, retry: 0,
+    events: [],               // { ts, symbol, side, usd } — side SELL=롱 청산, BUY=숏 청산
+    taker: null, takerSymbol: '', takerError: '', takerLoading: false,
+  };
+
+  function liqConnect() {
+    if (liq.ws || !state.active) return;
+    let ws = null;
+    try { ws = new WebSocket(BINANCE_WS); } catch (e) { liqRetry(); return; }
+    liq.ws = ws;
+    liq.wsState = 'connecting';
+    ws.onopen = () => { liq.wsState = 'live'; liq.retry = 0; paintLiq(); };
+    ws.onmessage = (event) => {
+      let msg = null;
+      try { msg = JSON.parse(event.data); } catch (e) { return; }
+      const o = msg && msg.e === 'forceOrder' && msg.o;
+      if (!o) return;
+      const price = num(o.p);
+      const qty = num(o.q);
+      const ts = num(o.T) || Date.now();
+      if (!price || !qty) return;
+      liq.events.push({ ts, symbol: String(o.s || '').toUpperCase(), side: o.S === 'SELL' ? 'long' : 'short', usd: price * qty });
+      if (liq.events.length > LIQ_KEEP) liq.events.splice(0, liq.events.length - LIQ_KEEP);
+      paintLiq();
+    };
+    ws.onclose = () => {
+      liq.ws = null;
+      liq.wsState = 'down';
+      paintLiq();
+      if (state.active) liqRetry();
+    };
+    ws.onerror = () => { /* 곧 close가 온다 */ };
+  }
+
+  function liqRetry() {
+    if (liq.retryTimer || !state.active) return;
+    liq.retry = Math.min(liq.retry + 1, 6);
+    liq.retryTimer = setTimeout(() => { liq.retryTimer = 0; liqConnect(); }, Math.min(15000, 2000 * liq.retry));
+  }
+
+  function liqStop() {
+    if (liq.ws) { const ws = liq.ws; liq.ws = null; try { ws.close(); } catch (e) { /* 이미 닫힘 */ } }
+    if (liq.retryTimer) { clearTimeout(liq.retryTimer); liq.retryTimer = 0; }
+    liq.wsState = 'idle';
+  }
+
+  function paintLiq() {
+    const stat = $('#dash-liq-stat');
+    const last = $('#dash-liq-last');
+    if (!stat) return;
+    const now = Date.now();
+    const recent = liq.events.filter((e) => now - e.ts <= LIQ_WINDOW_MS);
+    const usd = recent.reduce((s, e) => s + e.usd, 0);
+    const longs = recent.filter((e) => e.side === 'long').length;
+    const shorts = recent.length - longs;
+    const link = liq.wsState === 'live' ? '' : liq.wsState === 'connecting' ? ' (연결 중)' : ' (끊김 — 재연결 시도)';
+    if (!recent.length) {
+      stat.textContent = `최근 10분 강제청산 없음${link} — 스트림을 지켜보는 중`;
+    } else {
+      stat.textContent = `최근 10분 강제청산 약 ${compactUsd(usd)}${link} · 롱 청산 ${longs}건 / 숏 청산 ${shorts}건`;
+    }
+    if (last) {
+      const e = recent[recent.length - 1];
+      last.innerHTML = e
+        ? `<span class="liq-side ${e.side === 'long' ? 'down' : 'up'}">${e.side === 'long' ? '롱' : '숏'} 청산</span> 약 ${compactUsd(e.usd)} <b>${esc(e.symbol)}</b> · ${esc(ageText(e.ts))}`
+        : '';
+    }
+    const takerEl = $('#dash-liq-taker');
+    if (takerEl) {
+      const t = liq.taker;
+      if (t && t.symbol === state.symbol) {
+        const ratio = t.ratio;
+        const label = ratio == null ? '—' : ratio >= 1.1 ? '매수 우위' : ratio <= 0.9 ? '매도 우위' : '균형';
+        const cls = ratio == null ? '' : ratio >= 1.1 ? 'up' : ratio <= 0.9 ? 'down' : '';
+        takerEl.innerHTML = `<small>테이커 매수/매도 (5분봉 · ${esc(baseOf(t.symbol))})</small>`
+          + `<b class="${cls}">비율 ${ratio == null ? '—' : ratio.toFixed(2)}</b><em class="${cls}">${label}</em>`;
+      } else if (liq.takerError) {
+        takerEl.innerHTML = `<small>테이커 매수/매도</small><b>—</b><em>${esc(liq.takerError)}</em>`;
+      } else {
+        takerEl.innerHTML = `<small>테이커 매수/매도</small><b>—</b><em>불러오는 중…</em>`;
+      }
+    }
+  }
+
+  async function loadTaker() {
+    if (liq.takerLoading || !state.active) return;
+    liq.takerLoading = true;
+    const symbol = state.symbol;
+    try {
+      const rows = await getJSON(`${BINANCE_TAKER}?symbol=${symbol}&period=5m&limit=1`, 8000);
+      const row = Array.isArray(rows) && rows[0];
+      if (symbol !== state.symbol) return;
+      liq.taker = row ? { symbol, ratio: num(row.buySellRatio), at: Date.now() } : null;
+      liq.takerError = row ? '' : '바이낸스 응답에 비율이 없습니다';
+    } catch (e) {
+      if (symbol !== state.symbol) return;
+      liq.taker = null;
+      liq.takerError = '바이낸스 응답 없음 (지역 제한일 수 있음) — 위 수급 요약 참조';
+    } finally {
+      liq.takerLoading = false;
+    }
+    paintLiq();
+  }
+
   /* ---------------------------------------------------------------- 화면 뼈대 */
 
   function build() {
@@ -151,6 +329,14 @@
                 <span class="lv-note" id="dash-res-note">캔들을 불러오는 중…</span>
               </div>
             </div>
+            <div class="dash-ind" aria-label="실시간 기술적 지표">
+              <span class="dash-ind-chip" title="실제 캔들 종가로 계산한 RSI(14) — 70 이상 과매수, 30 이하 과매도">
+                <small>RSI(14)</small><b id="dash-rsi">—</b><em id="dash-rsi-badge">—</em>
+              </span>
+              <span class="dash-ind-chip" title="MA20·MA60·MA120 배열 — 실제 캔들 종가 이동평균으로 계산">
+                <small>MA20·60·120</small><b id="dash-ma">—</b><em id="dash-ma-badge">—</em>
+              </span>
+            </div>
             <div class="dash-flow" id="dash-flow" aria-label="선물 수급 3대장 요약">
               <span class="dash-flow-cell"><small>펀딩비</small><b id="dash-funding">—</b></span>
               <span class="dash-flow-cell"><small>미결제약정 OI</small><b id="dash-oi">—</b></span>
@@ -187,6 +373,14 @@
             <div class="dash-scan-cols"><span>자산</span><span>24H 변화</span><span>거래대금 (24H)</span><span>수급 강도</span></div>
             <div id="dash-scan-rows"><div class="dash-scan-msg">바이비트 시세를 불러오는 중…</div></div>
             <div class="dash-scan-foot"><span>기준: 바이비트 선물 USDT 마켓</span><span id="dash-scan-updated"></span></div>
+          </section>
+
+          <section class="dash-card dash-liq-card" aria-label="실시간 강제청산과 체결 수급">
+            <h2>실시간 강제청산 &amp; 체결 수급</h2>
+            <div class="dash-liq-stat" id="dash-liq-stat">바이낸스 강제청산 스트림에 연결하는 중…</div>
+            <div class="dash-liq-last" id="dash-liq-last"></div>
+            <div class="dash-liq-taker" id="dash-liq-taker">테이커 매수/매도 비율을 불러오는 중…</div>
+            <div class="dash-liq-foot">바이낸스 선물 공개 데이터 · !forceOrder 스트림 + 테이커 비율(5분봉, 60초 갱신)</div>
           </section>
 
           <section class="dash-card dash-ev-card" aria-label="오늘의 일정과 고래 동향">
@@ -424,7 +618,17 @@
   function paintFromCandles() {
     const levels = calcLevels(state.candles);
     if (levels) state.levels = levels;
+    if (state.candles.length >= 15) {
+      state.indicators = {
+        rsi: rsiValue(state.candles),
+        trend: maTrend(state.candles),
+        ma20: smaValue(state.candles, 20),
+        ma60: smaValue(state.candles, 60),
+        ma120: smaValue(state.candles, 120),
+      };
+    }
     paintSummary();
+    paintIndicators();
     drawChart();
     paintOhlc();
     paintChartMessage(state.candles.length ? '' : (state.chartError || '캔들을 불러오는 중…'));
@@ -732,6 +936,7 @@
     paintChartMessage('캔들을 불러오는 중…');
     loadCandles(true);
     loadSummary();
+    loadTaker();   // 테이커 비율은 종목을 따라간다 (강제청산 스트림은 시장 전체)
   }
 
   /* ---------------------------------------------------------------- 오늘의 일정 & 고래 동향 */
@@ -834,6 +1039,8 @@
     state.timers.scan = setInterval(() => { if (canRun()) loadScanner(); }, SCAN_MS);
     state.timers.whale = setInterval(() => { if (canRun()) paintWhaleCard(); }, WHALE_MS);
     state.timers.chips = setInterval(() => { if (canRun()) paintChips(); }, CHIP_MS);
+    state.timers.liqPaint = setInterval(() => { if (canRun()) paintLiq(); }, 5000);   // 청산 카드의 “방금/몇 분 전” 나이 갱신
+    state.timers.taker = setInterval(() => { if (canRun()) loadTaker(); }, 60000);
   }
 
   function stopTimers() {
@@ -852,7 +1059,7 @@
     const next = !!active;
     if (state.active === next) return;
     state.active = next;
-    if (!next) { stopTimers(); return; }
+    if (!next) { stopTimers(); liqStop(); return; }
     // 첫 진입 — 데이터를 받아 온다. 값이 오기 전까지 화면은 '—'를 유지한다
     if (!state.candles.length) paintChartMessage('캔들을 불러오는 중…');
     loadCandles(true);
@@ -861,6 +1068,8 @@
     paintWhaleCard();
     paintChips();
     bindScannerSort();
+    liqConnect();   // 바이낸스 강제청산 스트림
+    loadTaker();
     startTimers();
   }
 

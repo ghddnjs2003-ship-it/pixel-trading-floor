@@ -89,6 +89,21 @@ html.dash-view #dash-page {
 .dash-level.res { color: #f05b6e; }
 .dash-cell .lv-note { display: block; color: #66748a; font-size: 9px; margin-top: 5px; }
 
+/* 기술적 지표 칩 (RSI · MA 배열) */
+.dash-ind { display: flex; align-items: stretch; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.dash-ind-chip {
+  display: flex; align-items: baseline; gap: 8px; padding: 7px 11px;
+  background: #0c1118; border: 1px solid #1d2635; border-radius: 5px; min-width: 0;
+}
+.dash-ind-chip small { color: #7d8798; font-size: 9.5px; white-space: nowrap; }
+.dash-ind-chip b { color: #e6ebf3; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dash-ind-chip b:empty::after { content: '—'; color: #66748a; }
+.dash-ind-chip em { font-style: normal; font-size: 10px; color: #9aa4b5; white-space: nowrap; }
+.dash-ind-chip em.warn { color: #f05b6e; }
+.dash-ind-chip em.safe { color: #2fca8c; }
+.dash-ind-chip em.up { color: #2fca8c; }
+.dash-ind-chip em.down { color: #f05b6e; }
+
 /* 수급 3대장 한 줄 */
 .dash-flow { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-top: 8px; padding: 9px 12px; background: #0c1118; border: 1px solid #1d2635; border-radius: 5px; }
 .dash-flow-cell { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
@@ -181,6 +196,24 @@ html.dash-view #dash-page {
 .dash-scan-msg.err { color: #e2b45c; }
 .dash-scan-foot { display: flex; justify-content: space-between; gap: 8px; padding-top: 8px; color: #66748a; font-size: 9px; }
 #dash-scan-rows.expanded { max-height: 46vh; overflow-y: auto; }
+
+/* ---- 실시간 강제청산 & 체결 수급 ---- */
+.dash-liq-card h2 { margin: 0 0 9px; font-size: 14px; color: #eef2f8; }
+.dash-liq-stat { color: #d3dae5; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.dash-liq-last { margin-top: 5px; color: #8b94a7; font-size: 11px; min-height: 15px; font-variant-numeric: tabular-nums; }
+.dash-liq-last .liq-side { font-weight: 700; }
+.dash-liq-last .liq-side.up { color: #2fca8c; }
+.dash-liq-last .liq-side.down { color: #f05b6e; }
+.dash-liq-last b { color: #e6ebf3; }
+.dash-liq-taker { display: flex; align-items: baseline; gap: 9px; margin-top: 9px; padding: 8px 11px; background: #0c1118; border: 1px solid #1d2635; border-radius: 5px; }
+.dash-liq-taker small { color: #7d8798; font-size: 9.5px; }
+.dash-liq-taker b { color: #e6ebf3; font-size: 13px; font-variant-numeric: tabular-nums; }
+.dash-liq-taker b.up { color: #2fca8c; }
+.dash-liq-taker b.down { color: #f05b6e; }
+.dash-liq-taker em { font-style: normal; font-size: 10px; color: #9aa4b5; }
+.dash-liq-taker em.up { color: #2fca8c; }
+.dash-liq-taker em.down { color: #f05b6e; }
+.dash-liq-foot { margin-top: 8px; color: #66748a; font-size: 9px; }
 
 /* ---- 오늘의 일정 & 고래 동향 ---- */
 .dash-ev-card h2 { margin: 0 0 10px; font-size: 14px; color: #eef2f8; }
