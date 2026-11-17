@@ -569,11 +569,15 @@
       longEl.textContent = '롱 —';
       shortEl.textContent = '숏 —';
       barLong.style.width = '0%';
+      const barShort = $('.dash-lsbar .ls-bar .short');
+      if (barShort) { barShort.style.flex = '0 1 auto'; barShort.style.width = '0%'; }
     } else {
       const share = Math.max(0, Math.min(1, d.longShare));
       longEl.textContent = `롱 ${(share * 100).toFixed(0)}%`;
       shortEl.textContent = `숏 ${((1 - share) * 100).toFixed(0)}%`;
       barLong.style.width = `${share * 100}%`;
+      const barShort = $('.dash-lsbar .ls-bar .short');
+      if (barShort) { barShort.style.flex = '1'; barShort.style.width = 'auto'; }
     }
 
     const note = $('#dash-flow-note');
