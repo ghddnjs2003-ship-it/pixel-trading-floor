@@ -280,6 +280,7 @@ html.dash-view #dash-page {
   #dash-mstrip .dash-chip-more {
     flex: none; margin-left: auto; font: inherit; font-size: 10px; color: #9fb0c9;
     background: #182031; border: 1px solid #2c3950; border-radius: 5px; padding: 5px 9px; cursor: pointer;
+    position: sticky; right: 0;  /* 칩이 넘쳐도 '전체 ▾'는 오른쪽 끝에 붙어 항상 보이게 */
   }
   #dash-mstrip.open .dash-chip { margin-bottom: 0; }
   #dash-mstrip .dash-chip[data-k="es"], #dash-mstrip .dash-chip[data-k="fx"], #dash-mstrip .dash-chip[data-k="btcd"] { display: none; }
