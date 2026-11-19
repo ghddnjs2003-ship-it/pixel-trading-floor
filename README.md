@@ -19,7 +19,7 @@
 - `lite/whale.js`, `lite/whale.css` — `[고래·일정]` 탭: 실시간 TRC20 고래 입출금(50만 달러 이상)과 이번 주 미국 주요 경제 일정
 - `data/calendar.json` — 이번 주 미국 주요 지표(High·Medium)를 한국 시간·한국어로 담은 일정표. `scripts/update-global.py --calendar`가 만들고 `.github/workflows/update-global.yml`이 함께 갱신합니다
 - `data/global.json` — 미 선물·달러 인덱스·원/달러 스냅숏(24시간 스파크 포함). `scripts/update-global.py`가 만들고 `.github/workflows/update-global.yml`이 10분마다 갱신합니다
-- `backend/` — 선택 사항인 Python 서버(LLM 분석 사용 시). GitHub Pages에는 쓰이지 않습니다.
+- `backend/` — 선택 사항인 Python 서버. 13인 LLM 분석(무료 API·로컬 Ollama 공용 어댑터), **더블 S+MDS v7 룰 엔진**, **과거 캔들 백테스트**, **킬스위치**가 있습니다. GitHub Pages에는 쓰이지 않습니다 — `backend/README.md` 참고.
 
 ## 글로벌 시황
 

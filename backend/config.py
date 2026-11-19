@@ -1,10 +1,22 @@
-"""Environment-backed server configuration; secrets never enter browser code."""
+"""환경변수에서 서버 설정을 읽는다. 키는 브라우저로 내려가지 않는다.
+
+LLM_PROVIDER 값
+- openai, xai(별칭 grok), groq, gemini, openrouter, cerebras, ollama
+- auto: 키가 있는 제공자를 위 순서(무료 먼저)로 고른다. 키가 하나도 없으면 ollama를 시도한다.
+- LLM_BASE_URL·LLM_MODEL을 주면 제공자 기본값을 덮어쓴다(자체 호스팅·새 모델 대응).
+"""
 
 import os
 from pathlib import Path
 
+from .providers import PROVIDER_SPECS, ProviderError
 
 BACKEND_DIR = Path(__file__).resolve().parent
+
+# auto가 고르는 순서 — 무료 한도 제공자를 먼저, 유료는 나중에
+AUTO_ORDER = ("groq", "gemini", "cerebras", "openrouter", "openai", "xai", "ollama")
+
+ALIASES = {"grok": "xai", "google": "gemini", "local": "ollama", "llama": "ollama"}
 
 
 def load_env_file(path=BACKEND_DIR / ".env"):
@@ -23,26 +35,43 @@ def load_env_file(path=BACKEND_DIR / ".env"):
             os.environ.setdefault(key, value)
 
 
+def _provider_config(name):
+    spec = PROVIDER_SPECS[name]
+    key_env = spec["key_env"]
+    api_key = os.getenv(key_env, "").strip() if key_env else ""
+    if key_env and not api_key:
+        raise ProviderError(f"{key_env} is not set in backend/.env")
+    model = (os.getenv("LLM_MODEL") or os.getenv(spec["model_env"]) or spec["model"]).strip()
+    return {
+        "provider": name,
+        "api_key": api_key,
+        "base_url": (os.getenv("LLM_BASE_URL") or spec["base_url"]).strip(),
+        "model": model,
+        "json_mode": spec["json_mode"],
+        "timeout": spec["timeout"],
+    }
+
+
+def _has_key(name):
+    key_env = PROVIDER_SPECS[name]["key_env"]
+    return True if not key_env else bool(os.getenv(key_env, "").strip())
+
+
 def get_provider_config():
     load_env_file()
-    provider = os.getenv("LLM_PROVIDER", "openai").strip().lower()
-    if provider == "auto":
-        provider = "openai" if os.getenv("OPENAI_API_KEY") else "xai"
-    if provider == "openai":
-        api_key = os.getenv("OPENAI_API_KEY", "").strip()
-        base_url = "https://api.openai.com/v1/chat/completions"
-        model = os.getenv("OPENAI_MODEL", "gpt-4.1-mini").strip()
-    elif provider in ("xai", "grok"):
-        provider = "xai"
-        api_key = os.getenv("XAI_API_KEY", "").strip()
-        base_url = "https://api.x.ai/v1/chat/completions"
-        model = os.getenv("XAI_MODEL", "grok-3-mini").strip()
-    else:
-        raise ValueError("LLM_PROVIDER must be openai, xai, grok, or auto")
-    if not api_key:
-        env_name = "OPENAI_API_KEY" if provider == "openai" else "XAI_API_KEY"
-        raise ValueError(f"{env_name} is not set in backend/.env")
-    return {"provider": provider, "api_key": api_key, "base_url": base_url, "model": model}
+    raw = os.getenv("LLM_PROVIDER", "auto").strip().lower() or "auto"
+    if raw == "auto":
+        for name in AUTO_ORDER:
+            if _has_key(name):
+                raw = name
+                break
+        else:
+            raise ProviderError("쓸 수 있는 제공자가 없습니다 — backend/.env에 무료 키 하나를 넣거나 "
+                                "Ollama(ollama serve)를 켜세요")
+    name = ALIASES.get(raw, raw)
+    if name not in PROVIDER_SPECS:
+        raise ProviderError("LLM_PROVIDER must be one of " + ", ".join(PROVIDER_SPECS) + ", auto")
+    return _provider_config(name)
 
 
 def get_port():
@@ -54,3 +83,36 @@ def get_port():
     if not 1 <= port <= 65535:
         raise ValueError("PORT must be between 1 and 65535")
     return port
+
+
+# ------------------------------------------------------------------ 전략·리스크 설정
+
+def get_strategy_config():
+    """백테스트·판정 파라미터. 환경변수로 덮어쓸 수 있게만 열어 둔다(기본값은 v7)."""
+    from .strategy import Params
+    def _f(key, default):
+        try:
+            return float(os.getenv(key, default))
+        except (TypeError, ValueError):
+            return default
+    return Params(
+        min_rr=_f("V7_MIN_RR", Params.min_rr),
+        volume_mult=_f("V7_VOLUME_MULT", Params.volume_mult),
+        cci_mode=os.getenv("V7_CCI_MODE", Params.cci_mode),
+    )
+
+
+def get_killswitch_rules():
+    from .risk import KillSwitchRules
+    def _f(key, default):
+        try:
+            return float(os.getenv(key, default))
+        except (TypeError, ValueError):
+            return default
+    return KillSwitchRules(
+        daily_loss_pct=_f("KILL_DAILY_LOSS_PCT", KillSwitchRules.daily_loss_pct),
+        max_consecutive_losses=int(_f("KILL_MAX_CONSECUTIVE_LOSSES", KillSwitchRules.max_consecutive_losses)),
+        max_daily_trades=int(_f("KILL_MAX_DAILY_TRADES", KillSwitchRules.max_daily_trades)),
+        volatility_pause_atr_pct=_f("KILL_VOLATILITY_ATR_PCT", KillSwitchRules.volatility_pause_atr_pct),
+        cooldown_minutes=int(_f("KILL_COOLDOWN_MINUTES", KillSwitchRules.cooldown_minutes)),
+    )
