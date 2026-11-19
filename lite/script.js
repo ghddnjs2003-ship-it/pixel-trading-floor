@@ -16,6 +16,9 @@
   const FNG_KO = { 'Extreme Fear': '극단적 공포', Fear: '공포', Neutral: '중립', Greed: '탐욕', 'Extreme Greed': '극단적 탐욕' };
   const FLOW_KO = { NEW_LONG: '신규 매수 유입', NEW_SHORT: '신규 매도 유입', SHORT_COVER: '숏 커버', LONG_UNWIND: '롱 정리', FLAT: '변화 없음' };
   const TRIGGER_KO = { BREAKOUT: '6시간 박스 돌파', BB_REENTRY: '볼린저 되돌림' };
+  // 진입 판정의 트리거 문구 — B안(requireTrigger: false)에서는 트리거 없이 들어간 자리가 흔하다
+  const trigKo = (p) => (p.trigger ? TRIGGER_KO[p.trigger] : '트리거 없이 추세만');
+  const trigLine = (p) => (p.trigger ? TRIGGER_KO[p.trigger] : R.requireTrigger ? '없음' : '없음 — 추세만으로 진입(트리거는 가점)');
   const AUX_KO = { fng: '공포탐욕', funding: '펀딩비', ls: '롱숏', flow: '수급' };
   const MISSING_KO = { funding: '펀딩비', oi: '미결제약정', ls: '롱숏 비율', fng: '공포탐욕지수' };
   const voteSide = (v) => (v === 1 ? 'LONG' : v === -1 ? 'SHORT' : null);
@@ -108,8 +111,8 @@
     }
     if (p.reason === 'RSI_GATE') {
       return p.candidate === 'LONG'
-        ? `RSI가 ${R.rsiLongMax} 아래로 식으면서 롱 트리거가 살아 있으면 다시 봅니다`
-        : `RSI가 ${R.rsiShortMin} 위로 올라오면서 숏 트리거가 살아 있으면 다시 봅니다`;
+        ? `RSI가 ${R.rsiLongMax} 아래로 식으면 다시 봅니다${R.requireTrigger ? '(롱 트리거까지 살아 있어야 합니다)' : ''}`
+        : `RSI가 ${R.rsiShortMin} 위로 올라오면 다시 봅니다${R.requireTrigger ? '(숏 트리거까지 살아 있어야 합니다)' : ''}`;
     }
     if (!sig.box) return '트리거(6시간 박스 돌파·볼린저 되돌림)가 나오면 다시 봅니다';
     return p.candidate === 'LONG'
@@ -132,7 +135,7 @@
     const mine = hold ? [] : side === 'LONG' ? L : S;
     const theirs = hold ? [] : side === 'LONG' ? S : L;
     const lvl = `진입 ${fmtPrice(plan.entry)} · 익절 ${fmtPrice(plan.target)}(증거금 +${R.targetMarginPct}%) · 손절 ${fmtPrice(plan.stop)}(증거금 −${R.stopMarginPct}%)`;
-    const why = hold ? `관망 (${weakWhy(an, true)})` : TRIGGER_KO[plan.trigger];
+    const why = hold ? `관망 (${weakWhy(an, true)})` : trigKo(plan);
 
     // TARO — 기술적 분석
     const taroBubble = hold ? (plan.reason === 'NO_TREND' ? '추세가 아직 안 서네요 — 관망할게요'
@@ -140,7 +143,7 @@
         : '과열·과매도 추격 구간입니다 — 관망')
       : plan.trigger === 'BREAKOUT' ? (sig.trend === 'UP' ? '상승 추세에 박스 상단 돌파!' : '하락 추세에 박스 하단 이탈!')
         : plan.trigger === 'BB_REENTRY' ? (sig.trend === 'UP' ? '상승 추세 속 되돌림 매수 자리' : '하락 추세 속 되돌림 매도 자리')
-          : `${sig.trend === 'UP' ? '상승' : '하락'} 추세, 트리거는 아직`;
+          : `${sig.trend === 'UP' ? '상승' : '하락'} 추세를 따라갑니다 — 트리거는 없지만 추세·비추격 조건은 통과했어요`;
     const taro = {
       bubble: taroBubble,
       report: [`[TARO · 기술적 분석] ${d} — 5분봉 ${snap.k5.length}개 · 1시간봉 ${snap.k1h.length}개`, `· 현재가 $${fmtPrice(sig.price)}`,
@@ -210,7 +213,7 @@
           warn].join('\n'),
     };
 
-    // ACE — 판정 (추세·트리거·추격 금지를 다 넘겨야 진입, 아니면 관망)
+    // ACE — 판정 (추세가 서고 추격이 아니면 진입 — B안은 트리거 없이도 진입, 아니면 관망)
     const dir = (side || plan.candidate) === 'LONG' ? 1 : -1;
     const auxLine = sig.aux.map((x) => `${AUX_KO[x.key]} ${x.vote == null ? `${NO_DATA}(0)` : score(x.vote * dir * R.auxWeight)}`).join(' · ');
     const points = `추세 ${sig.trend === 'FLAT' ? 0 : 1} + 트리거 ${plan.trigger ? 1 : 0} + 보조 ${score(plan.auxScore)}`;
@@ -222,12 +225,12 @@
         `· 추세: ${find('trend').text}`,
         `· 트리거: ${plan.trigger ? `${TRIGGER_KO[plan.trigger]}는 있지만 방향이 서지 않았습니다` : '없음'}`,
         `· 보조: ${auxLine} → 합계 ${score(plan.auxScore)}`,
-        '· 규칙: 추세·트리거·추격 금지를 모두 통과해야 진입합니다 — 이번에는 통과 못 했습니다', warn].join('\n'),
+        `· 규칙: ${R.requireTrigger ? '추세·트리거·추격 금지를 모두 통과해야 진입합니다' : '추세가 서고 RSI 추격만 아니면 진입합니다(트리거는 가점)'} — 이번에는 ${plan.reason === 'RSI_GATE' ? '추격 구간이라' : '추세가 서지 않아'} 관망입니다`, warn].join('\n'),
     } : {
-      bubble: `${SIDE_KO[side]} ${plan.confidence}% — ${TRIGGER_KO[plan.trigger]}`,
+      bubble: `${SIDE_KO[side]} ${plan.confidence}% — ${trigKo(plan)}`,
       report: [`[ACE · 판정] ${d} ${SIDE_KO[side]} — 확신도 ${plan.confidence}%`,
         `· 추세: ${find('trend').text}`,
-        `· 트리거: ${TRIGGER_KO[plan.trigger]}`,
+        `· 트리거: ${trigLine(plan)}`,
         plan.rsiHot ? `· 추격: ${weakWhy(an)}` : '',
         `· 보조: ${auxLine} → 합계 ${score(plan.auxScore)}`,
         `· 확신도 = 50 + 10 × (${points})${plan.rsiHot ? ` − RSI 추격 ${R.rsiPenalty}` : ''} → ${plan.confidence}% (50~85로 제한)`,
@@ -241,7 +244,7 @@
       report: `[RISKY · 공격적] 공격적으로 봐도 이번엔 들어가지 않습니다 — ${holdWhy(an)}. 증거금을 걸 자리가 아닙니다.`,
     } : {
       bubble: `확신도 ${plan.confidence}%면 충분합니다`,
-      report: `[RISKY · 공격적] 계획대로 가죠. ${mine.length ? `「${mine[0].text}」` : TRIGGER_KO[plan.trigger]} — 증거금 ${R.marginPct}%로 ${lev}배. ${warn}`,
+      report: `[RISKY · 공격적] 계획대로 가죠. ${mine.length ? `「${mine[0].text}」` : trigKo(plan)} — 증거금 ${R.marginPct}%로 ${lev}배. ${warn}`,
     };
     const safe = hold ? {
       bubble: '쉴 때는 쉬는 게 리스크 관리',
@@ -275,7 +278,7 @@
     // 판정 한 줄 (decision.rationale)
     let rationale = hold
       ? `관망 — ${holdWhy(an)} · 다음 조건: ${nextCondition(an)} (데모 버전 자체 로직 판정)`
-      : `${find('trend').text.replace(/^1시간 /, '')} + ${TRIGGER_KO[plan.trigger]} · 보조 ${score(plan.auxScore)} → ${SIDE_KO[side]} ${plan.confidence}% (데모 버전 자체 로직 판정)`;
+      : `${find('trend').text.replace(/^1시간 /, '')}${plan.trigger ? ` + ${TRIGGER_KO[plan.trigger]}` : ''} · 보조 ${score(plan.auxScore)} → ${SIDE_KO[side]} ${plan.confidence}% (데모 버전 자체 로직 판정)`;
     if (mode === 'algo') {
       if (pm.verdict === 'REJECT') rationale += ` [PM 기각] ${PM_KO[pm.code]}`;
       else if (pm.verdict === 'AMEND') rationale += ` [PM 수정승인] ${PM_KO[pm.code]}`;
