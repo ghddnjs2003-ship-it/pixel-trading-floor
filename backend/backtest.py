@@ -7,20 +7,24 @@
 - 수수료·슬리피지를 넣는다. 실전에서 사라지는 기대값을 백테스트가 감추지 않게.
 - 결과는 승률·평균 R·기대값·손익비·최대 낙폭·연속 손실로 낸다.
 
+청산 방식 (cfg.exit_mode)
+- bracket   : 목표가 한 번에 전량 청산(기본). 손절·목표를 같은 봉에서 둘 다 닿으면 손절 우선.
+- half_trail: 1R에서 절반 익절 + 손절을 본전으로, 남은 절반은 ATR 추적 손절/최종 목표.
+
 데이터
 - 공개 API(바이비트·OKX·비트겟·바이낸스) 또는 저장한 CSV/JSON을 읽는다. API 키는 필요 없다.
 - 바이비트는 지역(서버 위치)에 따라 403/451로 막힐 수 있어 다른 거래소로 물러날 수 있게 했다.
 - `--source auto`면 위 순서로 되는 곳을 쓴다.
 
 사용 예
-    python -m backend.backtest --symbol BTCUSDT --interval 15 --limit 1500 --source auto
+    python -m backend.backtest --symbol BTCUSDT --interval 15 --limit 3000 --source auto
+    python -m backend.backtest --symbol BTCUSDT --limit 3000 --source bitget --kind DS --target r:2.0
     python -m backend.backtest --csv data/btc_15m.csv --fee-bps 5 --slippage-bps 2
 """
 
 import argparse
 import csv
 import json
-import math
 import os
 import time
 from dataclasses import dataclass, asdict
@@ -30,7 +34,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from .strategy import Params, scan
+from .strategy import Params, atr_series, scan
 
 
 # ----------------------------------------------------------------------------- 데이터
@@ -113,7 +117,7 @@ def fetch_okx(symbol: str, interval: str, limit: int) -> List[Dict]:
 
 
 def fetch_bitget(symbol: str, interval: str, limit: int) -> List[Dict]:
-    """비트겟 v2 candles — 200개 단위."""
+    """비트겟 v2 candles — 200개 단위. 2026-11-19 기준 이 환경에서 15분봉 3,600개 검증."""
     product = "USDT-FUTURES"
     bar = _BITGET_BAR.get(interval, "15m")
     got: List[Dict] = []
@@ -165,6 +169,7 @@ def load_candles(symbol: str = "BTCUSDT", interval: str = "15", limit: int = 150
                 "interval": interval, "candles": candles[-limit:]}
 
     order = [source] if source != "auto" else ["bybit", "okx", "bitget", "binance"]
+    order = [o for o in order if o in SOURCES]
     errors = []
     for name in order:
         fn = SOURCES.get(name)
@@ -192,6 +197,13 @@ class BacktestConfig:
     slippage_bps: float = 2.0        # 편도 슬리피지(bp)
     max_leverage: float = 5.0        # 증거금 대비 최대 배수(명목 상한)
     allow_kinds: tuple = ("DS", "M1")
+    exit_mode: str = "bracket"       # bracket | half_trail
+    half_exit_r: float = 1.0         # half_trail: 절반 익절 지점(R배)
+    trail_atr: float = 1.5           # half_trail: 남은 절반 추적 손절 폭(ATR 배수)
+    max_bars: int = 0                # 0 = 제한 없음
+    target_mode: str = "signal"      # signal(신호 목표) | r(고정 R)
+    target_r: float = 1.5
+    min_rr: float = 0.0              # 0 = 신호 목표를 그대로. >0이면 이보다 가까운 신호는 건너뛴다
 
     def to_dict(self) -> Dict:
         return asdict(self)
@@ -201,55 +213,111 @@ def _bps(x: float) -> float:
     return x / 10_000.0
 
 
+def _target_price(side: str, entry: float, risk: float, sig: Dict, cfg: BacktestConfig) -> float:
+    if cfg.target_mode == "r":
+        return entry + risk * cfg.target_r if side == "LONG" else entry - risk * cfg.target_r
+    return sig["target"]
+
+
 def simulate(candles: Sequence[Dict], signals: Sequence[Dict], cfg: BacktestConfig,
              params: Optional[Params] = None) -> Dict:
-    """신호 목록을 봉 위에서 체결시킨다. 다음 봉 시가 진입, 손절·목표 도달 시 청산."""
+    """신호 목록을 봉 위에서 체결시킨다. 다음 봉 시가 진입, 청산은 cfg.exit_mode에 따라."""
     p = params or Params()
+    atr = atr_series(candles, p.atr_period) if cfg.exit_mode == "half_trail" else None
     by_index = {s["index"]: s for s in signals}
     equity = cfg.initial_equity
-    peak = equity
-    max_dd = 0.0
     trades: List[Dict] = []
     open_trade: Optional[Dict] = None
-    streak = 0
-    max_streak = 0
-    skipped = {"신호없음": 0, "포지션중": 0, "종류제외": 0, "리스크초과": 0}
+    skipped = {"신호없음": 0, "포지션중": 0, "종류제외": 0, "리스크초과": 0, "손익비미달": 0}
+    slip = _bps(cfg.slippage_bps)
+    fee = _bps(cfg.fee_bps)
+
+    def close_part(trade: Dict, price: float, frac: float, reason: str) -> float:
+        qty = trade["qty"] * frac
+        fill = price * (1 - slip) if trade["side"] == "LONG" else price * (1 + slip)
+        gross = (fill - trade["entry"]) * qty if trade["side"] == "LONG" else (trade["entry"] - fill) * qty
+        fees = (trade["entry"] + fill) * qty * fee
+        return gross - fees
 
     for i in range(len(candles)):
         bar = candles[i]
 
-        # 보유 중이면 이 봉에서 청산 여부를 본다(같은 봉에서 둘 다 닿으면 손절 우선)
         if open_trade:
-            side = open_trade["side"]
-            stop_hit = (bar["l"] <= open_trade["stop"]) if side == "LONG" else (bar["h"] >= open_trade["stop"])
-            target_hit = (bar["h"] >= open_trade["target"]) if side == "LONG" else (bar["l"] <= open_trade["target"])
-            exit_price = None
+            t = open_trade
+            side = t["side"]
+            hit_stop = (bar["l"] <= t["stop"]) if side == "LONG" else (bar["h"] >= t["stop"])
+            hit_target = (bar["h"] >= t["target"]) if side == "LONG" else (bar["l"] <= t["target"])
+            pnl = 0.0
             reason = None
-            if stop_hit:
-                exit_price, reason = open_trade["stop"], "STOP"
-            elif target_hit:
-                exit_price, reason = open_trade["target"], "TARGET"
-            if exit_price is not None:
-                slip = _bps(cfg.slippage_bps)
-                fill = exit_price * (1 - slip) if side == "LONG" else exit_price * (1 + slip)
-                qty = open_trade["qty"]
-                gross = (fill - open_trade["entry"]) * qty if side == "LONG" else (open_trade["entry"] - fill) * qty
-                fees = (open_trade["entry"] + fill) * qty * _bps(cfg.fee_bps)
-                pnl = gross - fees
-                equity += pnl
-                peak = max(peak, equity)
-                max_dd = max(max_dd, (peak - equity) / peak * 100 if peak else 0.0)
-                r_mult = pnl / open_trade["risk_usd"] if open_trade["risk_usd"] else 0.0
-                if pnl < 0:
-                    streak += 1
-                    max_streak = max(max_streak, streak)
+            exit_price = None
+            parts: List[Dict] = []
+            time_up = cfg.max_bars and (i - t["entry_bar"]) >= cfg.max_bars
+
+            if cfg.exit_mode == "half_trail" and not t["half_done"]:
+                first = t["first_target"]
+                hit_first = (bar["h"] >= first) if side == "LONG" else (bar["l"] <= first)
+                if hit_stop:
+                    pnl = close_part(t, t["stop"], 1.0, "STOP")
+                    reason, exit_price = "STOP", t["stop"]
+                elif hit_first:
+                    pnl += close_part(t, first, 0.5, "HALF")
+                    parts.append({"price": first, "frac": 0.5, "reason": "HALF"})
+                    t["half_done"] = True
+                    t["stop"] = t["entry"]                       # 본전으로
+                    # 같은 봉에서 본전 손절에 닿았으면 남은 절반도 정리(비관)
+                    left_stop = (bar["l"] <= t["stop"]) if side == "LONG" else (bar["h"] >= t["stop"])
+                    if left_stop:
+                        pnl += close_part(t, t["stop"], 0.5, "STOP")
+                        parts.append({"price": t["stop"], "frac": 0.5, "reason": "STOP"})
+                        reason, exit_price = "HALF_THEN_BE", t["stop"]
+                    elif hit_target:
+                        pnl += close_part(t, t["target"], 0.5, "TARGET")
+                        parts.append({"price": t["target"], "frac": 0.5, "reason": "TARGET"})
+                        reason, exit_price = "TARGET", t["target"]
+            elif cfg.exit_mode == "half_trail" and t["half_done"]:
+                # 추적 손절 — 직전까지의 고점/저점에서 trail_atr × ATR
+                a = atr[i] if atr and atr[i] else t["atr"]
+                if side == "LONG":
+                    t["peak"] = max(t["peak"], bar["h"])
+                    t["stop"] = max(t["stop"], t["peak"] - cfg.trail_atr * a)
                 else:
-                    streak = 0
+                    t["peak"] = min(t["peak"], bar["l"])
+                    t["stop"] = min(t["stop"], t["peak"] + cfg.trail_atr * a)
+                hit_stop = (bar["l"] <= t["stop"]) if side == "LONG" else (bar["h"] >= t["stop"])
+                if hit_stop:
+                    pnl = close_part(t, t["stop"], 0.5, "TRAIL")
+                    parts.append({"price": t["stop"], "frac": 0.5, "reason": "TRAIL"})
+                    reason, exit_price = "TRAIL", t["stop"]
+                elif hit_target:
+                    pnl = close_part(t, t["target"], 0.5, "TARGET")
+                    parts.append({"price": t["target"], "frac": 0.5, "reason": "TARGET"})
+                    reason, exit_price = "TARGET", t["target"]
+            else:
+                if hit_stop:
+                    pnl = close_part(t, t["stop"], 1.0, "STOP")
+                    reason, exit_price = "STOP", t["stop"]
+                elif hit_target:
+                    pnl = close_part(t, t["target"], 1.0, "TARGET")
+                    reason, exit_price = "TARGET", t["target"]
+
+            if exit_price is None and time_up and not t["half_done"]:
+                pnl = close_part(t, bar["c"], 1.0, "TIME")
+                reason, exit_price = "TIME", bar["c"]
+            elif exit_price is None and time_up and t["half_done"]:
+                pnl += close_part(t, bar["c"], 0.5, "TIME")
+                parts.append({"price": bar["c"], "frac": 0.5, "reason": "TIME"})
+                reason, exit_price = "TIME", bar["c"]
+
+            if exit_price is not None:
+                equity += pnl
                 trades.append({
-                    **{k: open_trade[k] for k in ("side", "kind", "grade", "entry", "stop", "target", "qty", "risk_usd")},
-                    "entry_time": open_trade["entry_time"], "exit_time": bar["t"], "exit": fill,
-                    "reason": reason, "pnl": round(pnl, 2), "r": round(r_mult, 3),
-                    "equity": round(equity, 2), "bars": i - open_trade["entry_bar"],
+                    **{k: t[k] for k in ("side", "kind", "grade", "entry", "stop", "target", "qty", "risk_usd")},
+                    "entry_time": t["entry_time"], "exit_time": bar["t"], "exit": exit_price,
+                    "reason": reason, "pnl": round(pnl, 2),
+                    "r": round(pnl / t["risk_usd"], 3) if t["risk_usd"] else 0.0,
+                    "equity": round(equity, 2), "bars": i - t["entry_bar"],
+                    "parts": parts, "signal_time": t["signal_time"],
+                    "reasons": t.get("reasons", []),
                 })
                 open_trade = None
             if open_trade:
@@ -269,18 +337,28 @@ def simulate(candles: Sequence[Dict], signals: Sequence[Dict], cfg: BacktestConf
             continue
 
         entry_bar = candles[i + 1]
-        slip = _bps(cfg.slippage_bps)
-        entry = entry_bar["o"] * (1 + slip) if sig["side"] == "LONG" else entry_bar["o"] * (1 - slip)
-        stop, target = sig["stop"], sig["target"]
+        side = sig["side"]
+        entry = entry_bar["o"] * (1 + slip) if side == "LONG" else entry_bar["o"] * (1 - slip)
+        stop = sig["stop"]
         # 시가가 이미 손절/목표를 지나 있으면 체결하지 않는다(갭에서 규칙이 무의미해짐)
-        if sig["side"] == "LONG" and (entry <= stop or entry >= target):
+        if side == "LONG" and entry <= stop:
             skipped["리스크초과"] += 1
             continue
-        if sig["side"] == "SHORT" and (entry >= stop or entry <= target):
+        if side == "SHORT" and entry >= stop:
             skipped["리스크초과"] += 1
             continue
         risk_per_unit = abs(entry - stop)
         if risk_per_unit <= 0:
+            continue
+        target = _target_price(side, entry, risk_per_unit, sig, cfg)
+        if cfg.min_rr and abs(target - entry) / risk_per_unit < cfg.min_rr - 1e-9:
+            skipped["손익비미달"] += 1
+            continue
+        if side == "LONG" and entry >= target:
+            skipped["리스크초과"] += 1
+            continue
+        if side == "SHORT" and entry <= target:
+            skipped["리스크초과"] += 1
             continue
         risk_usd = equity * cfg.risk_pct / 100
         qty = risk_usd / risk_per_unit
@@ -289,14 +367,19 @@ def simulate(candles: Sequence[Dict], signals: Sequence[Dict], cfg: BacktestConf
             qty = equity * cfg.max_leverage / entry
             risk_usd = qty * risk_per_unit
         open_trade = {
-            "side": sig["side"], "kind": sig["kind"], "grade": sig.get("grade"),
+            "side": side, "kind": sig["kind"], "grade": sig.get("grade"),
             "entry": entry, "stop": stop, "target": target, "qty": qty, "risk_usd": risk_usd,
-            "entry_time": entry_bar["t"], "entry_bar": i + 1,
-            "signal_bar": i, "reasons": sig.get("reasons", []),
+            "entry_time": entry_bar["t"], "entry_bar": i + 1, "signal_bar": i,
+            "signal_time": sig.get("time"), "atr": sig.get("atr"),
+            "half_done": False, "peak": entry,
+            "first_target": entry + risk_per_unit * cfg.half_exit_r if side == "LONG"
+            else entry - risk_per_unit * cfg.half_exit_r,
+            "reasons": sig.get("reasons", []),
         }
 
     stats = summarize(trades, cfg, equity)
     stats["skipped"] = skipped
+    stats["open_trade"] = open_trade is not None
     stats["source_symbol"] = None
     return {"stats": stats, "trades": trades, "final_equity": round(equity, 2)}
 
@@ -385,6 +468,15 @@ def _report(result: Dict) -> str:
     return "\n".join(lines)
 
 
+def _parse_target(text: str) -> Dict:
+    """--target signal | r:1.5 | r:2.0 | r:2.5"""
+    if text in (None, "", "signal"):
+        return {"target_mode": "signal"}
+    if text.startswith("r:"):
+        return {"target_mode": "r", "target_r": float(text[2:])}
+    raise SystemExit("--target은 signal 또는 r:1.5 / r:2.0 / r:2.5 형태로 주세요")
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="더블 S + MDS v7 룰 백테스트")
     ap.add_argument("--symbol", default="BTCUSDT")
@@ -392,28 +484,49 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--limit", type=int, default=1500, help="받을 봉 수")
     ap.add_argument("--source", default="auto", choices=["auto", "bybit", "okx", "bitget", "binance"])
     ap.add_argument("--csv", default=None, help="저장한 캔들 CSV(시각,시가,고가,저가,종가,거래량)")
+    ap.add_argument("--json-in", default=None, help="저장해 둔 캔들 JSON(엔진 대조·재현용)")
     ap.add_argument("--equity", type=float, default=10_000.0)
     ap.add_argument("--risk-pct", type=float, default=1.0)
     ap.add_argument("--fee-bps", type=float, default=5.0)
     ap.add_argument("--slippage-bps", type=float, default=2.0)
-    ap.add_argument("--min-rr", type=float, default=1.5)
+    ap.add_argument("--min-rr", type=float, default=1.5, help="엔진의 최소 손익비(목표 대체 기준)")
+    ap.add_argument("--tm", type=float, default=0.0, help="체결 시 최소 손익비(0 = 신호 목표 그대로)")
     ap.add_argument("--cci-mode", default="sign", choices=["off", "sign", "threshold"])
     ap.add_argument("--volume-mult", type=float, default=1.15, help="M1 돌파 거래량 배수")
     ap.add_argument("--bb-expand", default=True, action="store_true", help="M1 볼린저 폭 확장 요구(기본)")
     ap.add_argument("--no-bb-expand", dest="bb_expand", action="store_false")
     ap.add_argument("--sweep-max", type=float, default=1.6, help="더블 S 스윕 최대 깊이(ATR)")
-    ap.add_argument("--bos", default=True, action="store_true", help="회복 봉의 구조 돌파(BOS) 요구 — v6 기본")
-    ap.add_argument("--no-bos", dest="bos", action="store_false")
+    ap.add_argument("--bos", default=False, action="store_true", help="회복 봉의 구조 돌파(BOS) 요구(파인에는 없음)")
+    ap.add_argument("--stop-buf", type=float, default=0.15, help="더블 S 손절 버퍼(ATR)")
+    ap.add_argument("--m1-stop-buf", type=float, default=0.0, help="M1 손절 버퍼(ATR, 0 = 존 경계)")
+    ap.add_argument("--htf", default="off", choices=["off", "ema50", "ema200"], help="상위 4H 추세 필터")
+    ap.add_argument("--target", default="signal", help="signal | r:1.5 | r:2.0 | r:2.5")
+    ap.add_argument("--exit-mode", default="bracket", choices=["bracket", "half_trail"])
+    ap.add_argument("--trail-atr", type=float, default=1.5)
+    ap.add_argument("--max-bars", type=int, default=0)
     ap.add_argument("--allow", default="DS,M1", help="체결할 신호 종류(예: DS,M1 / DS)")
     ap.add_argument("--json-out", default=None, help="결과 JSON 저장 경로")
     args = ap.parse_args(argv)
 
+    htf_len = {"off": 50, "ema50": 50, "ema200": 200}[args.htf]
     params = Params(min_rr=args.min_rr, cci_mode=args.cci_mode, volume_mult=args.volume_mult,
-                    bb_expand=args.bb_expand, sweep_max_atr=args.sweep_max, require_bos=args.bos)
+                    bb_expand=args.bb_expand, sweep_max_atr=args.sweep_max, require_bos=args.bos,
+                    stop_buffer_atr=args.stop_buf, m1_stop_buffer_atr=args.m1_stop_buf,
+                    use_htf_trend=args.htf != "off", htf_ema_len=htf_len)
     cfg = BacktestConfig(initial_equity=args.equity, risk_pct=args.risk_pct,
                          fee_bps=args.fee_bps, slippage_bps=args.slippage_bps,
-                         allow_kinds=tuple(k.strip().upper() for k in args.allow.split(",") if k.strip()))
-    result = run_backtest(args.symbol, args.interval, args.limit, args.source, args.csv, cfg, params)
+                         allow_kinds=tuple(k.strip().upper() for k in args.allow.split(",") if k.strip()),
+                         exit_mode=args.exit_mode, trail_atr=args.trail_atr, max_bars=args.max_bars,
+                         min_rr=args.tm, **_parse_target(args.target))
+    if args.json_in:
+        candles = json.load(open(args.json_in, encoding="utf-8"))
+        signals = scan(candles, params)
+        result = simulate(candles, signals, cfg, params)
+        result.update(source=f"json:{os.path.basename(args.json_in)}", symbol=args.symbol,
+                      interval=args.interval, bars=len(candles), signal_count=len(signals),
+                      period={"from": candles[0]["t"], "to": candles[-1]["t"]})
+    else:
+        result = run_backtest(args.symbol, args.interval, args.limit, args.source, args.csv, cfg, params)
     print(_report(result))
     if args.json_out:
         with open(args.json_out, "w", encoding="utf-8") as fh:
