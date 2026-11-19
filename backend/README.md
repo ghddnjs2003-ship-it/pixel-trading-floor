@@ -452,9 +452,11 @@ python -m backend.mtf --json data/btc_5m_105000.json  --htf 60 --top 20
 **(8) AI 맥락 필터(3단계) — 오늘은 무료 한도에 막혔다**
 
 후보는 15분·런던·4ATR·3R(체결 167건)로 정하고 `--tradable`(체결된 신호만 심사)로 돌렸다.
-28건을 심사한 뒤 **Gemini 무료 한도 소진(HTTP 429, "exceeded your current quota")**으로 중단됐다.
+**32건을 심사한 뒤 Gemini 무료 한도 소진(HTTP 429, "exceeded your current quota")으로 중단**됐다.
+그 32건에서는 **거부한 쪽의 평균 R(+0.392)이 통과시킨 쪽(+0.316)보다 오히려 높았다** — 아직 판단할 수 있는
+표본이 아니고, 오히려 필터가 승자를 자르는 방향이다. 429로 실패한 12건은 통과 처리되어 집계에 섞이지 않는다(캐시에 없음).
 (`--tradable`·`--tf-label`·`--prompt-version` 옵션은 이번에 추가 — 시간봉이 다른 후보를 같은 루브릭으로 심사하려면 필요하다.)
-같은 명령을 한도가 풀린 뒤 다시 돌리면 캐시(`data/ai_cache.json`)에 남은 28건은 호출 없이 이어진다:
+같은 명령을 한도가 풀린 뒤 다시 돌리면 캐시(`data/ai_cache.json`)에 남은 32건은 호출 없이 이어진다:
 
 ```bash
 python3 -m backend.ai_filter --json data/btc_15m_45000.json --native --tradable --preset none \

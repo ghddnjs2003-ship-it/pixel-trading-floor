@@ -1223,13 +1223,16 @@
   }
  },
  "part3_ai_filter": {
-  "status": "차단 — Gemini 무료 한도 소진(HTTP 429)",
-  "attempted_candidate": "15분 통합 · 런던 · 4ATR · 3R (체결 신호 167건)",
+  "status": "차단 — Gemini 무료 한도 소진(HTTP 429, 'exceeded your current quota')",
+  "attempted_candidate": "15분 통합 · 런던 · 4ATR · 3R (체결 신호 167건, --tradable)",
   "prompt": "ctx-v2|BTCUSDT|15m|london4atr3r · tf_label=15분봉 · 문턱 60",
-  "reviewed_before_block": 40,
-  "real_calls": 28,
-  "http_429_errors": 12,
-  "note": "무료 한도가 풀리면 같은 명령으로 이어서 돌린다(캐시 data/ai_cache.json에 28건 응답 보존).",
+  "reviewed": 32,
+  "pass": 11,
+  "reject": 21,
+  "avg_r_pass": 0.316,
+  "avg_r_reject": 0.392,
+  "avg_r_all": 0.366,
+  "note": "32건만 심사돼 판단 불가. 그 32건에서는 거부한 쪽의 평균 R(+0.392)이 통과시킨 쪽(+0.316)보다 오히려 높았다(필터가 승자를 자르는 방향). 429 오류 12건은 통과 처리돼 집계에 섞이지 않았다(캐시에 없음). 한도가 풀리면 같은 명령으로 이어서 돌린다(캐시에 32건 응답 보존).",
   "resume_command": "python3 -m backend.ai_filter --json data/btc_15m_45000.json --native --tradable --preset none --tf-label 15분봉 --prompt-version \"ctx-v2|BTCUSDT|15m|london4atr3r\" --base-p '{\"stop_mode\":\"atr\",\"stop_atr\":4.0}' --base-c '{\"allow_kinds\":[\"DS\",\"M1\"],\"target_mode\":\"r\",\"target_r\":3.0,\"session_filter\":\"london\"}' --json-out out/ai_filter_15m_london4atr3r.json"
  },
  "conclusion": "5·15분·1시간·4시간 어디에서도 인샘플·아웃샘플을 모두 통과하고 다른 시간봉·종목에서 재현되는 규칙은 없었다. 5분은 우연 기대치(1.01x), 4시간은 0.96x로 '양쪽 플러스' 칸 수가 우연과 같았고, 15분·1시간은 2.4~2.6x로 조금 높았지만 그 1위 칸이 다른 시간봉(5m 0.69·30m 0.87·1h 1.09)과 ETH 15분(0.89)에서 재현되지 않았다. MTF는 구조 자체는 설계대로 동작하지만(테스트로 고정), 성적은 방향 베팅이었다 — 롱 쪽은 모든 구간에서 마이너스, 숏 쪽은 하락 구간에서만 플러스. 실전 후보는 없음."
