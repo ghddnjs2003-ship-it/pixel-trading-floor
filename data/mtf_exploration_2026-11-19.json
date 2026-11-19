@@ -1,0 +1,1236 @@
+{
+ "meta": {
+  "date": "2026-11-19",
+  "split": 0.6,
+  "costs": "편도 수수료 5bp + 슬리피지 2bp · 거래당 리스크 1% · 손절 우선 체결 · 다음 봉 시가 진입",
+  "data": {
+   "btc_5m": "Bitget BTCUSDT 5분봉 105,000봉 2025-11-17~2026-11-19",
+   "btc_15m": "Bitget 45,000봉 2025-08-05~2026-11-19",
+   "btc_30m": "Bitget 60,000봉 2023-06-11~2026-11-19",
+   "btc_60m": "Bitget 64,208봉 2019-07-10~2026-11-19",
+   "btc_4h": "Bitget 16,053봉 2019-07-10~2026-11-19",
+   "eth_15m": "Bitget 45,000봉 2025-08~2026-11"
+  },
+  "note": "캔들 파일(data/btc_5m_105000.json·btc_4h_16200.json)은 크기 때문에 git에서 제외한다."
+ },
+ "part1_grids": {
+  "5m": {
+   "cells": 1296,
+   "cells_with_sample": 1171,
+   "is_positive_pct": 31.4,
+   "os_positive_pct": 5.1,
+   "both_positive": 19,
+   "chance_expected": 18.9,
+   "ratio_vs_chance": 1.01,
+   "preset": "short(5분: 손절 4/6/8/12ATR × 6세션 × 6청산 × 3종류 × 3상위)"
+  },
+  "15m": {
+   "cells": 1296,
+   "cells_with_sample": 1289,
+   "is_positive_pct": 25.7,
+   "os_positive_pct": 4.8,
+   "both_positive": 41,
+   "chance_expected": 15.9,
+   "ratio_vs_chance": 2.58,
+   "preset": "short(15분: 손절 2/3/4/6ATR × 6세션 × 6청산 × 3종류 × 3상위)"
+  },
+  "1h": {
+   "cells": 324,
+   "cells_with_sample": 324,
+   "is_positive_pct": 15.4,
+   "os_positive_pct": 3.4,
+   "both_positive": 4,
+   "chance_expected": 1.7,
+   "ratio_vs_chance": 2.36,
+   "preset": "long(손절 4종 × 목표 9종 × 시간 3종 × 3종류)"
+  },
+  "4h": {
+   "cells": 324,
+   "cells_with_sample": 324,
+   "is_positive_pct": 61.4,
+   "os_positive_pct": 8.3,
+   "both_positive": 16,
+   "chance_expected": 16.6,
+   "ratio_vs_chance": 0.96,
+   "preset": "long(같은 격자 · 존은 4시간봉 몸통 피벗)"
+  }
+ },
+ "part1_candidates": {
+  "15m_london_4atr_3r": {
+   "label": "15분 통합 · 런던 · 4ATR · 3R (격자 1위)",
+   "bars": 45000,
+   "period": [
+    1754358300000,
+    1795059000000
+   ],
+   "price_change_pct": -45.1,
+   "trades": 167,
+   "win_pct": 37.1,
+   "pf": 1.47,
+   "net_pct": 77.89,
+   "mdd_pct": 13.05,
+   "avg_r": 0.36,
+   "cost_r": 0.121,
+   "long_net": 3107.06,
+   "short_net": 4682.38,
+   "splits": {
+    "is": {
+     "n": 106,
+     "net_pct": 66.53,
+     "pf": 1.73
+    },
+    "os": {
+     "n": 61,
+     "net_pct": 11.37,
+     "pf": 1.15
+    }
+   },
+   "oracle": {
+    "all": {
+     "n": 167,
+     "mean_r": 0.364,
+     "ci95_low": 0.073,
+     "ci95_high": 0.655,
+     "p_mean_positive": 0.992
+    },
+    "oracle_remove_worst_5pct": {
+     "removed": 8,
+     "mean_r": 0.444,
+     "ci95": [
+      0.145,
+      0.744
+     ],
+     "p_positive": 0.999
+    },
+    "oracle_remove_worst_10pct": {
+     "removed": 16,
+     "mean_r": 0.53,
+     "ci95": [
+      0.213,
+      0.844
+     ],
+     "p_positive": 1.0
+    },
+    "oracle_remove_worst_20pct": {
+     "removed": 33,
+     "mean_r": 0.743,
+     "ci95": [
+      0.382,
+      1.073
+     ],
+     "p_positive": 1.0
+    },
+    "oracle_remove_worst_30pct": {
+     "removed": 50,
+     "mean_r": 1.013,
+     "ci95": [
+      0.646,
+      1.352
+     ],
+     "p_positive": 1.0
+    }
+   }
+  },
+  "1h_4atr_6r": {
+   "label": "1시간 통합 · 전일 · 4ATR · 6R (균형 최고)",
+   "bars": 64208,
+   "period": [
+    1562756400000,
+    1795057200000
+   ],
+   "price_change_pct": 383.6,
+   "trades": 141,
+   "win_pct": 18.4,
+   "pf": 1.25,
+   "net_pct": 36.0,
+   "mdd_pct": 18.99,
+   "avg_r": 0.25,
+   "cost_r": 0.037,
+   "long_net": 4746.09,
+   "short_net": -1146.35,
+   "splits": {
+    "is": {
+     "n": 77,
+     "net_pct": 17.56,
+     "pf": 1.24
+    },
+    "os": {
+     "n": 64,
+     "net_pct": 18.44,
+     "pf": 1.27
+    }
+   },
+   "oracle": {
+    "all": {
+     "n": 141,
+     "mean_r": 0.254,
+     "ci95_low": -0.144,
+     "ci95_high": 0.7,
+     "p_mean_positive": 0.891
+    },
+    "oracle_remove_worst_5pct": {
+     "removed": 7,
+     "mean_r": 0.324,
+     "ci95": [
+      -0.145,
+      0.794
+     ],
+     "p_positive": 0.922
+    },
+    "oracle_remove_worst_10pct": {
+     "removed": 14,
+     "mean_r": 0.401,
+     "ci95": [
+      -0.093,
+      0.898
+     ],
+     "p_positive": 0.956
+    },
+    "oracle_remove_worst_20pct": {
+     "removed": 28,
+     "mean_r": 0.581,
+     "ci95": [
+      0.085,
+      1.139
+     ],
+     "p_positive": 0.988
+    },
+    "oracle_remove_worst_30pct": {
+     "removed": 42,
+     "mean_r": 0.811,
+     "ci95": [
+      0.246,
+      1.445
+     ],
+     "p_positive": 0.997
+    }
+   }
+  },
+  "4h_m1_4atr_6r": {
+   "label": "4시간 M1 · 4ATR · 6R (4h 1위)",
+   "bars": 16053,
+   "period": [
+    1562745600000,
+    1795046400000
+   ],
+   "price_change_pct": 383.6,
+   "trades": 51,
+   "win_pct": 23.5,
+   "pf": 1.7,
+   "net_pct": 34.51,
+   "mdd_pct": 10.65,
+   "avg_r": 0.63,
+   "cost_r": 0.021,
+   "long_net": 1299.25,
+   "short_net": 2151.45,
+   "splits": {
+    "is": {
+     "n": 25,
+     "net_pct": 24.84,
+     "pf": 2.23
+    },
+    "os": {
+     "n": 26,
+     "net_pct": 9.67,
+     "pf": 1.33
+    }
+   },
+   "oracle": {
+    "all": {
+     "n": 51,
+     "mean_r": 0.626,
+     "ci95_low": -0.061,
+     "ci95_high": 1.45,
+     "p_mean_positive": 0.95
+    },
+    "oracle_remove_worst_5pct": {
+     "removed": 2,
+     "mean_r": 0.694,
+     "ci95": [
+      -0.161,
+      1.549
+     ],
+     "p_positive": 0.929
+    },
+    "oracle_remove_worst_10pct": {
+     "removed": 5,
+     "mean_r": 0.806,
+     "ci95": [
+      -0.105,
+      1.719
+     ],
+     "p_positive": 0.971
+    },
+    "oracle_remove_worst_20pct": {
+     "removed": 10,
+     "mean_r": 1.03,
+     "ci95": [
+      0.008,
+      2.051
+     ],
+     "p_positive": 0.991
+    },
+    "oracle_remove_worst_30pct": {
+     "removed": 15,
+     "mean_r": 1.315,
+     "ci95": [
+      0.343,
+      2.479
+     ],
+     "p_positive": 0.992
+    }
+   }
+  }
+ },
+ "part1_cross_tf": {
+  "15m_rule": {
+   "BTC 5m": {
+    "trades": 345,
+    "pf": 0.69,
+    "net_pct": -61.11,
+    "is": {
+     "n": 212,
+     "net_pct": -33.82,
+     "pf": 0.74
+    },
+    "os": {
+     "n": 133,
+     "net_pct": -27.3,
+     "pf": 0.61
+    }
+   },
+   "BTC 15m(원래)": {
+    "trades": 167,
+    "pf": 1.47,
+    "net_pct": 77.89,
+    "is": {
+     "n": 106,
+     "net_pct": 66.53,
+     "pf": 1.73
+    },
+    "os": {
+     "n": 61,
+     "net_pct": 11.37,
+     "pf": 1.15
+    }
+   },
+   "BTC 30m": {
+    "trades": 244,
+    "pf": 0.87,
+    "net_pct": -21.39,
+    "is": {
+     "n": 137,
+     "net_pct": -19.87,
+     "pf": 0.8
+    },
+    "os": {
+     "n": 107,
+     "net_pct": -1.51,
+     "pf": 0.98
+    }
+   },
+   "BTC 1h": {
+    "trades": 238,
+    "pf": 1.09,
+    "net_pct": 16.49,
+    "is": {
+     "n": 142,
+     "net_pct": 2.02,
+     "pf": 1.02
+    },
+    "os": {
+     "n": 96,
+     "net_pct": 14.47,
+     "pf": 1.2
+    }
+   },
+   "BTC 4h": {
+    "trades": 63,
+    "pf": 1.15,
+    "net_pct": 6.9,
+    "is": {
+     "n": 35,
+     "net_pct": 8.01,
+     "pf": 1.32
+    },
+    "os": {
+     "n": 28,
+     "net_pct": -1.1,
+     "pf": 0.95
+    }
+   },
+   "ETH 15m": {
+    "trades": 187,
+    "pf": 0.89,
+    "net_pct": -16.21,
+    "is": {
+     "n": 104,
+     "net_pct": -4.85,
+     "pf": 0.94
+    },
+    "os": {
+     "n": 83,
+     "net_pct": -11.36,
+     "pf": 0.82
+    }
+   }
+  }
+ },
+ "part2_grids": {
+  "5m_1h": {
+   "cells": 360,
+   "cells_with_sample": 334,
+   "is_positive_pct": 16.8,
+   "os_positive_pct": 1.8,
+   "both_positive": 3,
+   "chance_expected": 1.0,
+   "ratio_vs_chance": 2.98
+  },
+  "5m_4h": {
+   "cells": 360,
+   "cells_with_sample": 311,
+   "is_positive_pct": 39.2,
+   "os_positive_pct": 7.1,
+   "both_positive": 14,
+   "chance_expected": 8.6,
+   "ratio_vs_chance": 1.62
+  },
+  "15m_1h": {
+   "cells": 360,
+   "cells_with_sample": 311,
+   "is_positive_pct": 19.6,
+   "os_positive_pct": 14.1,
+   "both_positive": 24,
+   "chance_expected": 8.6,
+   "ratio_vs_chance": 2.78
+  },
+  "15m_4h": {
+   "cells": 360,
+   "cells_with_sample": 302,
+   "is_positive_pct": 41.4,
+   "os_positive_pct": 11.3,
+   "both_positive": 22,
+   "chance_expected": 14.1,
+   "ratio_vs_chance": 1.56
+  }
+ },
+ "part2_candidates": {
+  "5m_4h_ema200": {
+   "label": "4H EMA200 + 5분 DS/M1 · 1.0 HTF-ATR · 6R",
+   "bars": 105000,
+   "period": [
+    1763411700000,
+    1795068600000
+   ],
+   "price_change_pct": -30.7,
+   "trades": 76,
+   "win_pct": 22.4,
+   "pf": 1.51,
+   "net_pct": 38.11,
+   "mdd_pct": 12.59,
+   "avg_r": 0.47,
+   "cost_r": 0.099,
+   "long_net": 428.36,
+   "short_net": 3382.46,
+   "splits": {
+    "is": {
+     "n": 46,
+     "net_pct": 28.08,
+     "pf": 1.66
+    },
+    "os": {
+     "n": 30,
+     "net_pct": 10.03,
+     "pf": 1.31
+    }
+   },
+   "oracle": {
+    "all": {
+     "n": 76,
+     "mean_r": 0.467,
+     "ci95_low": -0.177,
+     "ci95_high": 1.2,
+     "p_mean_positive": 0.927
+    },
+    "oracle_remove_worst_5pct": {
+     "removed": 3,
+     "mean_r": 0.533,
+     "ci95": [
+      -0.135,
+      1.208
+     ],
+     "p_positive": 0.952
+    },
+    "oracle_remove_worst_10pct": {
+     "removed": 7,
+     "mean_r": 0.63,
+     "ci95": [
+      -0.078,
+      1.341
+     ],
+     "p_positive": 0.972
+    },
+    "oracle_remove_worst_20pct": {
+     "removed": 15,
+     "mean_r": 0.859,
+     "ci95": [
+      0.06,
+      1.66
+     ],
+     "p_positive": 0.986
+    },
+    "oracle_remove_worst_30pct": {
+     "removed": 22,
+     "mean_r": 1.114,
+     "ci95": [
+      0.333,
+      2.018
+     ],
+     "p_positive": 0.997
+    }
+   }
+  },
+  "15m_4h_breakout": {
+   "label": "4H 돌파 + 15분 M1 · 1.5 HTF-ATR · 4R",
+   "bars": 45000,
+   "period": [
+    1754358300000,
+    1795059000000
+   ],
+   "price_change_pct": -45.1,
+   "trades": 67,
+   "win_pct": 28.4,
+   "pf": 1.4,
+   "net_pct": 24.22,
+   "mdd_pct": 14.07,
+   "avg_r": 0.35,
+   "cost_r": 0.069,
+   "long_net": 226.85,
+   "short_net": 2194.9,
+   "splits": {
+    "is": {
+     "n": 38,
+     "net_pct": 14.41,
+     "pf": 1.46
+    },
+    "os": {
+     "n": 29,
+     "net_pct": 9.8,
+     "pf": 1.34
+    }
+   },
+   "oracle": {
+    "all": {
+     "n": 67,
+     "mean_r": 0.349,
+     "ci95_low": -0.171,
+     "ci95_high": 0.942,
+     "p_mean_positive": 0.891
+    },
+    "oracle_remove_worst_5pct": {
+     "removed": 3,
+     "mean_r": 0.417,
+     "ci95": [
+      -0.128,
+      0.966
+     ],
+     "p_positive": 0.939
+    },
+    "oracle_remove_worst_10pct": {
+     "removed": 6,
+     "mean_r": 0.492,
+     "ci95": [
+      -0.082,
+      1.067
+     ],
+     "p_positive": 0.956
+    },
+    "oracle_remove_worst_20pct": {
+     "removed": 13,
+     "mean_r": 0.696,
+     "ci95": [
+      0.05,
+      1.344
+     ],
+     "p_positive": 0.983
+    },
+    "oracle_remove_worst_30pct": {
+     "removed": 20,
+     "mean_r": 0.96,
+     "ci95": [
+      0.322,
+      1.702
+     ],
+     "p_positive": 1.0
+    }
+   }
+  }
+ },
+ "part2_cross": {
+  "BTC 15m": {
+   "label": "BTC 15m ← 240분",
+   "bars": 45000,
+   "period": [
+    1754358300000,
+    1795059000000
+   ],
+   "price_change_pct": -45.1,
+   "trades": 90,
+   "win_pct": 18.9,
+   "pf": 1.2,
+   "net_pct": 17.74,
+   "mdd_pct": 17.96,
+   "avg_r": 0.22,
+   "cost_r": 0.104,
+   "long_net": -700.2,
+   "short_net": 2474.36,
+   "splits": {
+    "is": {
+     "n": 43,
+     "net_pct": 15.19,
+     "pf": 1.38
+    },
+    "os": {
+     "n": 47,
+     "net_pct": 2.55,
+     "pf": 1.05
+    }
+   },
+   "oracle": {
+    "all": {
+     "n": 90,
+     "mean_r": 0.218,
+     "ci95_low": -0.325,
+     "ci95_high": 0.836,
+     "p_mean_positive": 0.75
+    },
+    "oracle_remove_worst_5pct": {
+     "removed": 4,
+     "mean_r": 0.283,
+     "ci95": [
+      -0.289,
+      0.861
+     ],
+     "p_positive": 0.827
+    },
+    "oracle_remove_worst_10pct": {
+     "removed": 9,
+     "mean_r": 0.371,
+     "ci95": [
+      -0.233,
+      0.978
+     ],
+     "p_positive": 0.911
+    },
+    "oracle_remove_worst_20pct": {
+     "removed": 18,
+     "mean_r": 0.559,
+     "ci95": [
+      -0.028,
+      1.241
+     ],
+     "p_positive": 0.954
+    },
+    "oracle_remove_worst_30pct": {
+     "removed": 27,
+     "mean_r": 0.799,
+     "ci95": [
+      0.023,
+      1.575
+     ],
+     "p_positive": 0.984
+    }
+   }
+  },
+  "BTC 30m": {
+   "label": "BTC 30m ← 240분",
+   "bars": 60000,
+   "period": [
+    1686522600000,
+    1795059000000
+   ],
+   "price_change_pct": 144.1,
+   "trades": 211,
+   "win_pct": 13.7,
+   "pf": 0.81,
+   "net_pct": -30.08,
+   "mdd_pct": 39.43,
+   "avg_r": -0.14,
+   "cost_r": 0.103,
+   "long_net": -1630.4,
+   "short_net": -1377.28,
+   "splits": {
+    "is": {
+     "n": 120,
+     "net_pct": -30.75,
+     "pf": 0.7
+    },
+    "os": {
+     "n": 91,
+     "net_pct": 0.67,
+     "pf": 1.01
+    }
+   },
+   "oracle": {
+    "all": {
+     "n": 211,
+     "mean_r": -0.141,
+     "ci95_low": -0.467,
+     "ci95_high": 0.188,
+     "p_mean_positive": 0.183
+    },
+    "oracle_remove_worst_5pct": {
+     "removed": 10,
+     "mean_r": -0.088,
+     "ci95": [
+      -0.406,
+      0.261
+     ],
+     "p_positive": 0.3
+    },
+    "oracle_remove_worst_10pct": {
+     "removed": 21,
+     "mean_r": -0.026,
+     "ci95": [
+      -0.358,
+      0.341
+     ],
+     "p_positive": 0.446
+    },
+    "oracle_remove_worst_20pct": {
+     "removed": 42,
+     "mean_r": 0.112,
+     "ci95": [
+      -0.263,
+      0.522
+     ],
+     "p_positive": 0.678
+    },
+    "oracle_remove_worst_30pct": {
+     "removed": 63,
+     "mean_r": 0.286,
+     "ci95": [
+      -0.138,
+      0.713
+     ],
+     "p_positive": 0.918
+    }
+   }
+  },
+  "BTC 1h": {
+   "label": "BTC 1h ← 240분",
+   "bars": 64208,
+   "period": [
+    1562756400000,
+    1795057200000
+   ],
+   "price_change_pct": 383.6,
+   "trades": 331,
+   "win_pct": 12.7,
+   "pf": 0.78,
+   "net_pct": -52.97,
+   "mdd_pct": 59.1,
+   "avg_r": -0.2,
+   "cost_r": 0.09,
+   "long_net": -678.1,
+   "short_net": -4618.77,
+   "splits": {
+    "is": {
+     "n": 198,
+     "net_pct": -31.23,
+     "pf": 0.81
+    },
+    "os": {
+     "n": 133,
+     "net_pct": -21.74,
+     "pf": 0.73
+    }
+   },
+   "oracle": {
+    "all": {
+     "n": 331,
+     "mean_r": -0.201,
+     "ci95_low": -0.437,
+     "ci95_high": 0.071,
+     "p_mean_positive": 0.061
+    },
+    "oracle_remove_worst_5pct": {
+     "removed": 16,
+     "mean_r": -0.151,
+     "ci95": [
+      -0.416,
+      0.116
+     ],
+     "p_positive": 0.15
+    },
+    "oracle_remove_worst_10pct": {
+     "removed": 33,
+     "mean_r": -0.095,
+     "ci95": [
+      -0.353,
+      0.189
+     ],
+     "p_positive": 0.268
+    },
+    "oracle_remove_worst_20pct": {
+     "removed": 66,
+     "mean_r": 0.034,
+     "ci95": [
+      -0.257,
+      0.348
+     ],
+     "p_positive": 0.602
+    },
+    "oracle_remove_worst_30pct": {
+     "removed": 99,
+     "mean_r": 0.195,
+     "ci95": [
+      -0.135,
+      0.556
+     ],
+     "p_positive": 0.885
+    }
+   }
+  },
+  "ETH 15m": {
+   "label": "ETH 15m ← 240분",
+   "bars": 45000,
+   "period": [
+    1754358300000,
+    1795059000000
+   ],
+   "price_change_pct": -51.6,
+   "trades": 69,
+   "win_pct": 13.0,
+   "pf": 0.78,
+   "net_pct": -12.24,
+   "mdd_pct": 25.54,
+   "avg_r": -0.16,
+   "cost_r": 0.075,
+   "long_net": -1651.59,
+   "short_net": 428.0,
+   "splits": {
+    "is": {
+     "n": 36,
+     "net_pct": -22.16,
+     "pf": 0.32
+    },
+    "os": {
+     "n": 33,
+     "net_pct": 9.93,
+     "pf": 1.43
+    }
+   },
+   "oracle": {
+    "all": {
+     "n": 69,
+     "mean_r": -0.162,
+     "ci95_low": -0.67,
+     "ci95_high": 0.447,
+     "p_mean_positive": 0.31
+    },
+    "oracle_remove_worst_5pct": {
+     "removed": 3,
+     "mean_r": -0.119,
+     "ci95": [
+      -0.652,
+      0.517
+     ],
+     "p_positive": 0.287
+    },
+    "oracle_remove_worst_10pct": {
+     "removed": 6,
+     "mean_r": -0.072,
+     "ci95": [
+      -0.628,
+      0.59
+     ],
+     "p_positive": 0.396
+    },
+    "oracle_remove_worst_20pct": {
+     "removed": 13,
+     "mean_r": 0.056,
+     "ci95": [
+      -0.568,
+      0.802
+     ],
+     "p_positive": 0.536
+    },
+    "oracle_remove_worst_30pct": {
+     "removed": 20,
+     "mean_r": 0.22,
+     "ci95": [
+      -0.493,
+      1.073
+     ],
+     "p_positive": 0.686
+    }
+   }
+  },
+  "same_1y_window": {
+   "BTC 5m": {
+    "label": "BTC 5m",
+    "bars": 105000,
+    "period": [
+     1763411700000,
+     1795068600000
+    ],
+    "price_change_pct": -30.7,
+    "trades": 76,
+    "win_pct": 22.4,
+    "pf": 1.51,
+    "net_pct": 38.11,
+    "mdd_pct": 12.59,
+    "avg_r": 0.47,
+    "cost_r": 0.099,
+    "long_net": 428.36,
+    "short_net": 3382.46,
+    "splits": {
+     "is": {
+      "n": 46,
+      "net_pct": 28.08,
+      "pf": 1.66
+     },
+     "os": {
+      "n": 30,
+      "net_pct": 10.03,
+      "pf": 1.31
+     }
+    },
+    "oracle": {
+     "all": {
+      "n": 76,
+      "mean_r": 0.467,
+      "ci95_low": -0.177,
+      "ci95_high": 1.2,
+      "p_mean_positive": 0.927
+     },
+     "oracle_remove_worst_5pct": {
+      "removed": 3,
+      "mean_r": 0.533,
+      "ci95": [
+       -0.135,
+       1.208
+      ],
+      "p_positive": 0.952
+     },
+     "oracle_remove_worst_10pct": {
+      "removed": 7,
+      "mean_r": 0.63,
+      "ci95": [
+       -0.078,
+       1.341
+      ],
+      "p_positive": 0.972
+     },
+     "oracle_remove_worst_20pct": {
+      "removed": 15,
+      "mean_r": 0.859,
+      "ci95": [
+       0.06,
+       1.66
+      ],
+      "p_positive": 0.986
+     },
+     "oracle_remove_worst_30pct": {
+      "removed": 22,
+      "mean_r": 1.114,
+      "ci95": [
+       0.333,
+       2.018
+      ],
+      "p_positive": 0.997
+     }
+    }
+   },
+   "BTC 15m": {
+    "label": "BTC 15m",
+    "bars": 45000,
+    "period": [
+     1754358300000,
+     1795059000000
+    ],
+    "price_change_pct": -45.1,
+    "trades": 90,
+    "win_pct": 18.9,
+    "pf": 1.2,
+    "net_pct": 17.74,
+    "mdd_pct": 17.96,
+    "avg_r": 0.22,
+    "cost_r": 0.104,
+    "long_net": -700.2,
+    "short_net": 2474.36,
+    "splits": {
+     "is": {
+      "n": 43,
+      "net_pct": 15.19,
+      "pf": 1.38
+     },
+     "os": {
+      "n": 47,
+      "net_pct": 2.55,
+      "pf": 1.05
+     }
+    },
+    "oracle": {
+     "all": {
+      "n": 90,
+      "mean_r": 0.218,
+      "ci95_low": -0.325,
+      "ci95_high": 0.836,
+      "p_mean_positive": 0.75
+     },
+     "oracle_remove_worst_5pct": {
+      "removed": 4,
+      "mean_r": 0.283,
+      "ci95": [
+       -0.289,
+       0.861
+      ],
+      "p_positive": 0.827
+     },
+     "oracle_remove_worst_10pct": {
+      "removed": 9,
+      "mean_r": 0.371,
+      "ci95": [
+       -0.233,
+       0.978
+      ],
+      "p_positive": 0.911
+     },
+     "oracle_remove_worst_20pct": {
+      "removed": 18,
+      "mean_r": 0.559,
+      "ci95": [
+       -0.028,
+       1.241
+      ],
+      "p_positive": 0.954
+     },
+     "oracle_remove_worst_30pct": {
+      "removed": 27,
+      "mean_r": 0.799,
+      "ci95": [
+       0.023,
+       1.575
+      ],
+      "p_positive": 0.984
+     }
+    }
+   },
+   "BTC 30m": {
+    "label": "BTC 30m",
+    "bars": 60000,
+    "period": [
+     1686522600000,
+     1795059000000
+    ],
+    "price_change_pct": 144.1,
+    "trades": 211,
+    "win_pct": 13.7,
+    "pf": 0.81,
+    "net_pct": -30.08,
+    "mdd_pct": 39.43,
+    "avg_r": -0.14,
+    "cost_r": 0.103,
+    "long_net": -1630.4,
+    "short_net": -1377.28,
+    "splits": {
+     "is": {
+      "n": 120,
+      "net_pct": -30.75,
+      "pf": 0.7
+     },
+     "os": {
+      "n": 91,
+      "net_pct": 0.67,
+      "pf": 1.01
+     }
+    },
+    "oracle": {
+     "all": {
+      "n": 211,
+      "mean_r": -0.141,
+      "ci95_low": -0.467,
+      "ci95_high": 0.188,
+      "p_mean_positive": 0.183
+     },
+     "oracle_remove_worst_5pct": {
+      "removed": 10,
+      "mean_r": -0.088,
+      "ci95": [
+       -0.406,
+       0.261
+      ],
+      "p_positive": 0.3
+     },
+     "oracle_remove_worst_10pct": {
+      "removed": 21,
+      "mean_r": -0.026,
+      "ci95": [
+       -0.358,
+       0.341
+      ],
+      "p_positive": 0.446
+     },
+     "oracle_remove_worst_20pct": {
+      "removed": 42,
+      "mean_r": 0.112,
+      "ci95": [
+       -0.263,
+       0.522
+      ],
+      "p_positive": 0.678
+     },
+     "oracle_remove_worst_30pct": {
+      "removed": 63,
+      "mean_r": 0.286,
+      "ci95": [
+       -0.138,
+       0.713
+      ],
+      "p_positive": 0.918
+     }
+    }
+   },
+   "BTC 1h": {
+    "label": "BTC 1h",
+    "bars": 64208,
+    "period": [
+     1562756400000,
+     1795057200000
+    ],
+    "price_change_pct": 383.6,
+    "trades": 331,
+    "win_pct": 12.7,
+    "pf": 0.78,
+    "net_pct": -52.97,
+    "mdd_pct": 59.1,
+    "avg_r": -0.2,
+    "cost_r": 0.09,
+    "long_net": -678.1,
+    "short_net": -4618.77,
+    "splits": {
+     "is": {
+      "n": 198,
+      "net_pct": -31.23,
+      "pf": 0.81
+     },
+     "os": {
+      "n": 133,
+      "net_pct": -21.74,
+      "pf": 0.73
+     }
+    },
+    "oracle": {
+     "all": {
+      "n": 331,
+      "mean_r": -0.201,
+      "ci95_low": -0.437,
+      "ci95_high": 0.071,
+      "p_mean_positive": 0.061
+     },
+     "oracle_remove_worst_5pct": {
+      "removed": 16,
+      "mean_r": -0.151,
+      "ci95": [
+       -0.416,
+       0.116
+      ],
+      "p_positive": 0.15
+     },
+     "oracle_remove_worst_10pct": {
+      "removed": 33,
+      "mean_r": -0.095,
+      "ci95": [
+       -0.353,
+       0.189
+      ],
+      "p_positive": 0.268
+     },
+     "oracle_remove_worst_20pct": {
+      "removed": 66,
+      "mean_r": 0.034,
+      "ci95": [
+       -0.257,
+       0.348
+      ],
+      "p_positive": 0.602
+     },
+     "oracle_remove_worst_30pct": {
+      "removed": 99,
+      "mean_r": 0.195,
+      "ci95": [
+       -0.135,
+       0.556
+      ],
+      "p_positive": 0.885
+     }
+    }
+   }
+  }
+ },
+ "part2_rolling": {
+  "btc_30m_1y_windows": {
+   "2023-06~2024-06": {
+    "price_change_pct": 168.6,
+    "trades": 52,
+    "pf": 0.67,
+    "net_pct": -15.79,
+    "long_net": -268.55,
+    "short_net": -1310.68
+   },
+   "2023-12~2024-12": {
+    "price_change_pct": 156.5,
+    "trades": 54,
+    "pf": 1.06,
+    "net_pct": 2.89,
+    "long_net": -676.15,
+    "short_net": 965.13
+   },
+   "2024-06~2025-06": {
+    "price_change_pct": 54.7,
+    "trades": 59,
+    "pf": 0.73,
+    "net_pct": -15.06,
+    "long_net": -499.54,
+    "short_net": -1006.23
+   },
+   "2024-12~2025-12": {
+    "price_change_pct": -6.6,
+    "trades": 65,
+    "pf": 0.48,
+    "net_pct": -26.62,
+    "long_net": -1822.24,
+    "short_net": -839.95
+   },
+   "2025-06~2026-06": {
+    "price_change_pct": -29.4,
+    "trades": 64,
+    "pf": 0.95,
+    "net_pct": -2.79,
+    "long_net": -286.69,
+    "short_net": 7.5
+   },
+   "2025-12~2026-12": {
+    "price_change_pct": -28.5,
+    "trades": 56,
+    "pf": 1.11,
+    "net_pct": 6.06,
+    "long_net": -443.07,
+    "short_net": 1048.64
+   }
+  }
+ },
+ "part3_ai_filter": {
+  "status": "차단 — Gemini 무료 한도 소진(HTTP 429)",
+  "attempted_candidate": "15분 통합 · 런던 · 4ATR · 3R (체결 신호 167건)",
+  "prompt": "ctx-v2|BTCUSDT|15m|london4atr3r · tf_label=15분봉 · 문턱 60",
+  "reviewed_before_block": 40,
+  "real_calls": 28,
+  "http_429_errors": 12,
+  "note": "무료 한도가 풀리면 같은 명령으로 이어서 돌린다(캐시 data/ai_cache.json에 28건 응답 보존).",
+  "resume_command": "python3 -m backend.ai_filter --json data/btc_15m_45000.json --native --tradable --preset none --tf-label 15분봉 --prompt-version \"ctx-v2|BTCUSDT|15m|london4atr3r\" --base-p '{\"stop_mode\":\"atr\",\"stop_atr\":4.0}' --base-c '{\"allow_kinds\":[\"DS\",\"M1\"],\"target_mode\":\"r\",\"target_r\":3.0,\"session_filter\":\"london\"}' --json-out out/ai_filter_15m_london4atr3r.json"
+ },
+ "conclusion": "5·15분·1시간·4시간 어디에서도 인샘플·아웃샘플을 모두 통과하고 다른 시간봉·종목에서 재현되는 규칙은 없었다. 5분은 우연 기대치(1.01x), 4시간은 0.96x로 '양쪽 플러스' 칸 수가 우연과 같았고, 15분·1시간은 2.4~2.6x로 조금 높았지만 그 1위 칸이 다른 시간봉(5m 0.69·30m 0.87·1h 1.09)과 ETH 15분(0.89)에서 재현되지 않았다. MTF는 구조 자체는 설계대로 동작하지만(테스트로 고정), 성적은 방향 베팅이었다 — 롱 쪽은 모든 구간에서 마이너스, 숏 쪽은 하락 구간에서만 플러스. 실전 후보는 없음."
+}

@@ -435,6 +435,9 @@ def simulate(candles: Sequence[Dict], signals: Sequence[Dict], cfg: BacktestConf
         if sig.get("stop_atr"):                       # ATR 고정 손절 — 실제 진입가 기준으로 다시 잡는다
             dist = sig["stop_atr"] * sig["atr"]
             stop = entry - dist if side == "LONG" else entry + dist
+        elif sig.get("stop_dist"):                    # MTF: 상위 봉 ATR 등 '가격 거리'를 직접 준 손절
+            dist = float(sig["stop_dist"])
+            stop = entry - dist if side == "LONG" else entry + dist
         # 시가가 이미 손절/목표를 지나 있으면 체결하지 않는다(갭에서 규칙이 무의미해짐)
         if side == "LONG" and entry <= stop:
             skipped["리스크초과"] += 1

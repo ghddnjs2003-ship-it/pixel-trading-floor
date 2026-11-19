@@ -813,6 +813,21 @@ def select_signals(candles: Sequence[Dict], signals: Sequence[Dict],
     return out
 
 
+def tradable_signals(candles: Sequence[Dict], signals: Sequence[Dict], cfg: BacktestConfig,
+                     params: Optional[Params] = None) -> List[Dict]:
+    """체결 모형이 **실제로 진입한** 신호만 남긴다(포지션 중복으로 버려지는 신호 제외).
+
+    포지션을 하나만 들고 가므로 15분봉처럼 보유가 길면 신호의 절반 이상이 체결되지 않는다.
+    그 신호까지 AI에게 심사시키면 호출을 낭비하고 '심사했지만 안 산 후보'가 성과에 섞인다.
+    """
+    from .backtest import simulate
+
+    res = simulate(candles, signals, cfg, params or Params())
+    by_t = {int(c["t"]): i for i, c in enumerate(candles)}
+    taken = {by_t[int(t["entry_time"])] - 1 for t in res["trades"] if int(t["entry_time"]) in by_t}
+    return [s for s in signals if int(s["index"]) in taken]
+
+
 def load(path: str) -> List[Dict]:
     candles = json.load(open(path, encoding="utf-8"))
     candles.sort(key=lambda c: c["t"])
@@ -824,8 +839,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--json", default=None, help="캔들 JSON(없으면 거래소에서 받는다)")
     ap.add_argument("--source", default="bitget")
     ap.add_argument("--limit", type=int, default=60000)
-    ap.add_argument("--tf", type=int, default=0, choices=[0, 15, 30, 60], help="0이면 JSON 봉 그대로")
+    ap.add_argument("--tf", type=int, default=0, choices=[0, 5, 15, 30, 60, 240], help="0이면 JSON 봉 그대로")
     ap.add_argument("--native", action="store_true", help="JSON을 그 봉 그대로 쓴다")
+    ap.add_argument("--tf-label", default="", help="지시문에 적을 시간봉 이름(예: 15분봉·4시간봉). 비우면 30분봉")
+    ap.add_argument("--prompt-version", default="", help="캐시를 가르는 판본 이름(시장·시간봉별)")
     ap.add_argument("--preset", default="nominee", choices=["nominee", "none"])
     ap.add_argument("--base-p", default=None, help="Params 덮어쓰기(JSON)")
     ap.add_argument("--base-c", default=None, help="BacktestConfig 덮어쓰기(JSON)")
@@ -834,6 +851,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--min-interval", type=float, default=2.0, help="호출 사이 최소 간격(초)")
     ap.add_argument("--cache", default=str(CACHE_DIR / "ai_cache.json"))
     ap.add_argument("--max-calls", type=int, default=0, help="이번 실행의 최대 호출 수(초과분은 통과)")
+    ap.add_argument("--tradable", action="store_true",
+                    help="체결 모형이 실제로 진입한 신호만 심사한다(포지션 중복 신호 제외)")
     ap.add_argument("--on-error", default="pass", choices=["pass", "reject"])
     ap.add_argument("--threshold", type=float, default=60.0, help="loss_prob가 이 값 이상이면 REJECT")
     ap.add_argument("--no-sweep", action="store_true", help="문턱 표를 생략")
@@ -859,6 +878,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     engine = Engine(params)
     signals = engine.run(candles)          # capture_at=None → 신호 봉마다 상태 스냅숏
     signals = select_signals(candles, signals, cfg)
+    if args.tradable:
+        signals = tradable_signals(candles, signals, cfg, params)
     split_i = int(len(candles) * args.split)
     split_t = candles[split_i]["t"]
     if args.only_os:
@@ -883,7 +904,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     ai = AIFilter(FilterConfig(model=args.model, min_interval=args.min_interval,
                                cache_path=args.cache, max_calls=args.max_calls,
-                               on_error=args.on_error, loss_threshold=args.threshold))
+                               on_error=args.on_error, loss_threshold=args.threshold,
+                               tf_label=args.tf_label or FilterConfig.tf_label,
+                               prompt_version=args.prompt_version or FilterConfig.prompt_version))
     kept, reviews = review_signals(candles, signals, ai, series, engine.capture, log_every=20,
                                    trade_cfg=cfg)
     result = compare(candles, signals, kept, reviews, cfg, params, args.split)

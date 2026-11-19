@@ -257,6 +257,80 @@ def preset_sens(base_p: Dict, base_c: Dict) -> List[Dict]:
     return specs
 
 
+def preset_short_tf(tf: int = 5) -> List[Dict]:
+    """짧은 호흡(5·15분) 전용 격자 — 수수료 벽을 먼저 넘는 축부터 본다.
+
+    5·15분봉은 왕복 14bp가 손절 폭의 큰 몫이라 **좁은 손절(1~2ATR)은 후보에서 뺀다**
+    (README 구조 실험 (1): 1ATR이면 건당 0.7R을 비용으로 낸다). 그래서 손절 하한을 5분 4ATR·15분 2ATR로 두고,
+    세션(유동성 구간)·신호 종류·청산 방식·4H 추세 동조를 함께 곱한다.
+    """
+    stops = ("4", "6", "8", "12") if tf <= 5 else ("2", "3", "4", "6")
+    axes = {
+        "kind": [
+            {"label": "통합", "c": {"allow_kinds": ("DS", "M1")}},
+            {"label": "더블S", "c": {"allow_kinds": ("DS",)}},
+            {"label": "M1", "c": {"allow_kinds": ("M1",)}},
+        ],
+        "stop": [{"label": f"{s}ATR", "p": {"stop_mode": "atr", "stop_atr": float(s)}} for s in stops],
+        "exit": [
+            {"label": "2R", "c": {"target_mode": "r", "target_r": 2.0}},
+            {"label": "3R", "c": {"target_mode": "r", "target_r": 3.0}},
+            {"label": "4R", "c": {"target_mode": "r", "target_r": 4.0}},
+            {"label": "6R", "c": {"target_mode": "r", "target_r": 6.0}},
+            {"label": "추적3ATR", "c": {"exit_mode": "trail", "trail_atr": 3.0}},
+            {"label": "반익+추적3ATR", "c": {"exit_mode": "half_trail", "trail_atr": 3.0}},
+        ],
+        "session": [
+            {"label": "전일", "c": {"session_filter": "off"}},
+            {"label": "런던", "c": {"session_filter": "london"}},
+            {"label": "뉴욕", "c": {"session_filter": "ny"}},
+            {"label": "런던+뉴욕", "c": {"session_filter": "london_ny"}},
+            {"label": "뉴욕개장", "c": {"session_filter": "ny_open"}},
+            {"label": "아시아", "c": {"session_filter": "asia"}},
+        ],
+        "htf": [
+            {"label": "상위off", "p": {}},
+            {"label": "4H50동조", "p": {"use_htf_trend": True, "htf_ema_len": 50, "ds_htf_filter": True}},
+            {"label": "4H200동조", "p": {"use_htf_trend": True, "htf_ema_len": 200, "ds_htf_filter": True}},
+        ],
+    }
+    return build(axes)
+
+
+def preset_long_tf() -> List[Dict]:
+    """긴 호흡(1·4시간) 전용 격자 — 목표 R을 넓게, 시간 손절·추적 청산을 함께 본다.
+
+    구조 목표(`signal`: 반대편 유동성·1H 매물대)를 기준선으로 두고 1.5~6R, 추적 2종, 시간 손절을 곱한다.
+    """
+    exits = [{"label": "목표청산", "c": {"target_mode": "signal"}}]
+    exits += [{"label": f"{r}R", "c": {"target_mode": "r", "target_r": r}} for r in (1.5, 2.0, 3.0, 4.0, 6.0)]
+    exits += [
+        {"label": "추적3ATR", "c": {"exit_mode": "trail", "trail_atr": 3.0}},
+        {"label": "반익+추적3ATR", "c": {"exit_mode": "half_trail", "trail_atr": 3.0}},
+        {"label": "본전+추적3ATR", "c": {"exit_mode": "be_trail", "trail_atr": 3.0}},
+    ]
+    axes = {
+        "kind": [
+            {"label": "통합", "c": {"allow_kinds": ("DS", "M1")}},
+            {"label": "더블S", "c": {"allow_kinds": ("DS",)}},
+            {"label": "M1", "c": {"allow_kinds": ("M1",)}},
+        ],
+        "stop": [
+            {"label": "구조손절", "p": {"stop_mode": "structure"}},
+            {"label": "2ATR", "p": {"stop_mode": "atr", "stop_atr": 2.0}},
+            {"label": "3ATR", "p": {"stop_mode": "atr", "stop_atr": 3.0}},
+            {"label": "4ATR", "p": {"stop_mode": "atr", "stop_atr": 4.0}},
+        ],
+        "exit": exits,
+        "time": [
+            {"label": "시간무제한", "c": {"max_bars": 0}},
+            {"label": "24봉청산", "c": {"max_bars": 24}},
+            {"label": "96봉청산", "c": {"max_bars": 96}},
+        ],
+    }
+    return build(axes)
+
+
 def preset_nominee() -> List[Dict]:
     """2026-11-19 구조 실험에서 남긴 후보 — "지금 유일하게 살아남은 두 칸"을 같은 틀에서 다시 본다.
 
@@ -280,10 +354,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--json", default=None, help="15분봉 캔들 JSON")
     ap.add_argument("--source", default="bitget")
     ap.add_argument("--limit", type=int, default=30000)
-    ap.add_argument("--tf", type=int, default=15, choices=[15, 30, 60], help="기준 시간봉(분)")
+    ap.add_argument("--tf", type=int, default=15, choices=[5, 15, 30, 60, 240], help="기준 시간봉(분)")
     ap.add_argument("--native", action="store_true", help="JSON을 그 봉 그대로 쓴다(리샘플 안 함)")
+    ap.add_argument("--box-tf", type=int, default=0,
+                    help="매물대 존을 만드는 상위 봉(분). 0이면 자동(min(기준봉,60) 이상: 4시간봉은 240)")
     ap.add_argument("--split", type=float, default=0.6)
-    ap.add_argument("--preset", default="core", choices=["core", "filter", "refine", "sens", "nominee"])
+    ap.add_argument("--preset", default="core",
+                    choices=["core", "filter", "refine", "sens", "nominee", "short", "long"])
     ap.add_argument("--base-p", default=None, help="기본 Params 덮어쓰기(JSON 문자열)")
     ap.add_argument("--base-c", default=None, help="기본 BacktestConfig 덮어쓰기(JSON 문자열)")
     ap.add_argument("--order", default="sorted", choices=["sorted", "given"], help="출력 순서")
@@ -297,12 +374,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         candles = resample(candles, args.tf)
     base_p = json.loads(args.base_p) if args.base_p else None
     base_c = json.loads(args.base_c) if args.base_c else None
+    # 4시간봉을 기준봉으로 쓰면 1시간 리샘플이 불가능하다 — 존은 기준봉 몸통 피벗으로 만든다.
+    box_tf = args.box_tf or (args.tf if args.tf >= 60 else 60)
+    if args.tf != 60 or args.box_tf:
+        base_p = {**(base_p or {}), "box_tf_minutes": box_tf}
     if args.preset == "sens":
         specs = preset_sens(base_p or {}, base_c or {})
     else:
         specs = {"core": preset_core, "filter": preset_filter, "refine": preset_refine,
-                 "nominee": preset_nominee}[args.preset]()
-    print(f"■ {len(candles)}봉 · {args.tf}분 · 조합 {len(specs)}종 · "
+                 "nominee": preset_nominee, "short": lambda: preset_short_tf(args.tf),
+                 "long": preset_long_tf}[args.preset]()
+    print(f"■ {len(candles)}봉 · {args.tf}분(존 {box_tf}분) · 조합 {len(specs)}종 · "
           f"인샘플 {int(len(candles) * args.split)}봉/아웃샘플 {len(candles) - int(len(candles) * args.split)}봉")
     rows = run_rows(candles, specs, args.split, base_p, base_c)
     if args.order == "given":

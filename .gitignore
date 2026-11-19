@@ -16,6 +16,8 @@ data/btc_15m_48000_2025.json
 data/btc_15m_holdout.json
 data/btc_30m_60000.json
 data/btc_60m_65000.json
+data/btc_5m_105000.json
+data/btc_4h_16200.json
 data/eth_15m_45000.json
 out/
 

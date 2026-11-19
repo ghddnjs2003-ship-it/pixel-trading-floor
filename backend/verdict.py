@@ -212,7 +212,8 @@ def report(candles: Sequence[Dict], p: Params, cfg: BacktestConfig,
 def main(argv: Optional[Sequence[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="후보 조합 심층 검증")
     ap.add_argument("--json", required=True)
-    ap.add_argument("--tf", type=int, default=15, choices=[15, 30, 60], help="15분봉 데이터를 이 봉으로 리샘플")
+    ap.add_argument("--tf", type=int, default=15, choices=[5, 15, 30, 60, 240],
+                    help="15분봉 데이터를 이 봉으로 리샘플(4시간은 --native 권장)")
     ap.add_argument("--native", action="store_true", help="JSON을 그 봉 그대로 쓴다(리샘플 안 함)")
     ap.add_argument("--base-p", default="{}")
     ap.add_argument("--base-c", default="{}")
