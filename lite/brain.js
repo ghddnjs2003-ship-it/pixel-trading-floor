@@ -15,8 +15,16 @@
     lsLow: 0.8, lsHigh: 1.8,
     auxWeight: 0.5, confMin: 50, confMax: 85,
     // 데모 버전은 100배 고정·수수료 없음(대표 결정 2026-10-01: 빨리 체결돼야 재밌다)
-    // 증거금 기준 익절 +15%·손절 −30% = 100배에서 가격 +0.15%·−0.3%, 청산 −0.5%보다 손절이 앞
-    targetMarginPct: 15, stopMarginPct: 30,
+    // 손익비(2026-11-20 홍원 님 "3번" 결정): 증거금 기준 익절 +20%·손절 −20% = 손익비 1:1
+    //   100배에서 가격 +0.2%·−0.2%, 청산 −0.5%보다 손절이 앞. 손익분기 승률 50%
+    //   (이전 +15% / −30%는 손익비 0.5:1·손익분기 67%라 61% 승률이면 손실 구간이었다)
+    //   실측(OKX 5분봉 3,785봉·15일): 옛 15/30은 승률 61.4%(손익분기 67% — 마이너스),
+    //   20/20은 51.9%(손익분기 50% — 플러스), 25/20은 48.8%. 승률을 지키면서 손익분기를 낮추는 쪽을 고름
+    targetMarginPct: 20, stopMarginPct: 20,
+    // 진입 조건(2026-11-20 "3번"): 추세 불명확·트리거 없음·RSI 추격은 관망(HOLD)
+    //   requireTrigger를 false로 두면 "추세는 있고 추격도 아닌" 자리를 트리거 없이도 진입시킨다
+    //   (실측에선 트리거 없는 자리가 오히려 승률이 높았음 — 필요하면 이 한 줄만 바꾸면 된다)
+    requireTrigger: true,
     mmPct: 0.5, feePct: 0,                    // 유지증거금률(청산 근사)·편도 수수료
     marginPct: 10, amendMarginPct: 5, pmLowConf: 60,
     defaultLev: 100, maxLev: 125,
@@ -83,7 +91,7 @@
     };
   }
 
-  // 진입가 기준 목표(증거금 +15%)·손절(−30%)·격리 청산가 근사
+  // 진입가 기준 목표(증거금 +20%)·손절(−20%)·격리 청산가 근사
   function levels(side, entry, lev) {
     const d = side === 'LONG' ? 1 : -1;
     return {
@@ -94,11 +102,12 @@
     };
   }
 
-  // ACE 판정 — 데모 버전은 체험용이라 관망 없이 매번 방향을 고른다(대표 결정 2026-10-01: 무료 3회가 관망으로 끝나지 않게)
-  //   방향: 1시간 추세(EMA50 ±0.1%), 추세가 없으면 가격이 EMA50 위면 롱·아래면 숏
+  // ACE 판정 — 2026-11-20 홍원 님 결정("3번"): 웹 체험용도 애매한 자리는 관망(HOLD)을 낸다
+  //   방향 후보: 1시간 추세(EMA50 ±0.1%), 추세가 없으면 가격이 EMA50 위면 롱·아래면 숏
   //   확신도 = 50 + 10 × (추세 1 + 트리거 1 + 보조 합) − RSI 추격 10, 50~85
-  //   추세·트리거가 다 있고 추격이 아닐 때만 정식 신호(ENTRY), 나머지는 "체험용 진입"(trial)
-  //   관망은 리스크 게이트(손절 전에 청산)와 PM 기각에서만 나온다
+  //   추세·트리거가 다 있고 추격이 아닐 때만 진입(ENTRY)
+  //   추세 불명확(FLAT)·트리거 없음·RSI 추격은 관망(HOLD) — 어제 73%가 오늘 61%로 떨어진 원인이
+  //   "매번 방향을 고르는 규칙"이었으므로, 애매한 자리는 아예 들어가지 않는다(승률이 아니라 기대값을 올린다)
   function decide(sig, { lev }) {
     const candidate = sig.trend === 'UP' ? 'LONG' : sig.trend === 'DOWN' ? 'SHORT'
       : sig.price >= sig.ema50h ? 'LONG' : 'SHORT';
@@ -111,28 +120,38 @@
     const auxScore = sig.aux.reduce((a, x) => a + (x.vote == null ? 0 : x.vote * dir * RULES.auxWeight), 0);
     const points = (sig.trend === 'FLAT' ? 0 : 1) + (trigger ? 1 : 0) + auxScore;
     const confidence = Math.round(Math.min(RULES.confMax, Math.max(RULES.confMin, 50 + 10 * points - (hot ? RULES.rsiPenalty : 0))));
-    const reason = sig.trend === 'FLAT' ? 'NO_TREND' : !trigger ? 'NO_TRIGGER' : hot ? 'RSI_GATE' : 'ENTRY';
+    const reason = sig.trend === 'FLAT' ? 'NO_TREND'
+      : !trigger && RULES.requireTrigger ? 'NO_TRIGGER' : hot ? 'RSI_GATE' : 'ENTRY';
+    const hold = reason !== 'ENTRY';
+    const lvls = levels(candidate, sig.price, lev);
     return {
-      ...levels(candidate, sig.price, lev),
-      side: candidate, action: dir === 1 ? 'BUY' : 'SELL', bias: candidate, candidate, trigger, lev,
-      auxScore, confidence, reason, trial: reason !== 'ENTRY', rsiHot: hot,
+      ...lvls,
+      side: hold ? null : candidate, action: hold ? 'HOLD' : dir === 1 ? 'BUY' : 'SELL',
+      bias: hold ? 'PASS' : candidate, candidate, trigger, lev,
+      auxScore, confidence, reason, hold, trial: hold, rsiHot: hot,
+      // 관망일 때 화면에 남겨 둘 후보 방향과 참고 레벨("돌파하면 이 자리") — 진입 계획은 아니다
+      pending: hold ? { side: candidate, ...lvls } : null,
     };
   }
 
   // 리스크 게이트 — 강등 기준은 "손절이 청산가 안쪽인가" 하나. 손익비·손익분기 승률은 공개만 한다.
   function riskGate(plan) {
-    if (!plan.side) {
-      return {
-        rr: null, ok: true, downgrade: false, stopBeyondLiq: false, liq: null, breakEvenWinPct: null,
-        reasons: ['관망 판정이라 리스크 게이트는 참고로만 계산했습니다.'], downgradeReasons: [],
-      };
-    }
     const lev = plan.lev;
     const feeRt = RULES.feePct * 2 * lev; // 왕복 수수료(증거금 대비 %)
     const win = RULES.targetMarginPct - feeRt;
     const loss = RULES.stopMarginPct + feeRt;
     const breakEvenWinPct = win > 0 ? (loss / (win + loss)) * 100 : 100;
     const rr = RULES.targetMarginPct / RULES.stopMarginPct;
+    const ruleNote = `승률형 규칙: 증거금 기준 익절 +${RULES.targetMarginPct}% · 손절 −${RULES.stopMarginPct}% (손익비 ${rr.toFixed(2)}) — ${feeRt > 0 ? '수수료 포함 ' : ''}손익분기 승률 약 ${Math.round(breakEvenWinPct)}%`;
+    if (!plan.side) {
+      // 관망 — 진입 계획이 없으니 게이트는 막을 것이 없다. 규칙 숫자만 참고로 함께 보여 준다
+      return {
+        rr: round(rr, 2), ok: true, downgrade: false, stopBeyondLiq: false, liq: null,
+        breakEvenWinPct: round(breakEvenWinPct, 1),
+        reasons: ['관망 판정 — 진입 계획이 없어 리스크 게이트는 통과 처리했습니다.', ruleNote],
+        downgradeReasons: [],
+      };
+    }
     // 손절가가 청산가와 같아도(100배: 둘 다 −0.5%) 손절 전에 청산될 수 있으니 막는다
     const stopBeyondLiq = plan.side === 'LONG' ? plan.stop <= plan.liq : plan.stop >= plan.liq;
     const reasons = [];
@@ -147,7 +166,7 @@
       const gap = (Math.abs(plan.stop - plan.liq) / plan.entry) * 100;
       reasons.push(`${lev}배 청산가 ${fmtPrice(plan.liq)} — 손절가가 청산가보다 ${gap.toFixed(2)}%p 앞에 있습니다`);
     }
-    reasons.push(`승률형 규칙: 증거금 기준 익절 +${RULES.targetMarginPct}% · 손절 −${RULES.stopMarginPct}% (손익비 ${rr.toFixed(2)}) — ${feeRt > 0 ? '수수료 포함 ' : ''}손익분기 승률 약 ${Math.round(breakEvenWinPct)}%`);
+    reasons.push(ruleNote);
     reasons.push(feeRt > 0 ? `왕복 수수료 = 증거금의 ${feeRt.toFixed(1)}% (편도 ${RULES.feePct}% × ${lev}배)` : '체험판은 수수료 없이 계산합니다 (실제 거래소는 왕복 수수료가 붙습니다)');
     return {
       rr: round(rr, 2), ok: !stopBeyondLiq, downgrade: stopBeyondLiq, stopBeyondLiq, liq: plan.liq,

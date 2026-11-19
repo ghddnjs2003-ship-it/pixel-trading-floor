@@ -575,6 +575,8 @@
     if (!modal) return;
     modal.classList.remove('hidden');
     renderStats();
+    // 백엔드 AI 모의매매 현황(lite/paperfeed.js)도 열 때마다 새로 받는다
+    if (window.LITE && LITE.paperWeb && typeof LITE.paperWeb.tick === 'function') LITE.paperWeb.tick(true);
     const close = modal.querySelector('.pm-close');
     if (close) close.focus();
     if (stats.timer) clearInterval(stats.timer);
@@ -625,6 +627,14 @@
           + '<button type="button" class="pm-close" data-pm-close aria-label="닫기">✕</button>'
         + '</header>'
         + '<div class="pm-cards" id="pm-cards"></div>'
+        + '<section class="pm-ai" id="pm-ai">'
+          + '<div class="pm-ai-head">'
+            + '<b>🤖 30분봉 Gemini AI 모의매매 현황</b>'
+            + '<span id="pm-ai-sub">불러오는 중…</span>'
+            + '<button type="button" id="pm-ai-reload" title="백엔드 모의매매 기록을 다시 받습니다">↻ 새로고침</button>'
+          + '</div>'
+          + '<div id="pm-ai-body"><div class="pm-ai-empty">불러오는 중…</div></div>'
+        + '</section>'
         + '<section class="pm-curve">'
           + '<div class="pm-curve-head"><b>계좌 수익 곡선</b><span id="pm-curve-sub">—</span>'
             + '<span class="pm-legend"><span class="pm-lg-eq"><i></i>평가 자산</span><span class="pm-lg-base"><i></i>시작 자본</span></span></div>'

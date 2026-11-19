@@ -1,0 +1,15 @@
+{
+  "date": "2026-11-20",
+  "start_equity": 10000.0,
+  "equity": 10000.0,
+  "realized_pnl": 0.0,
+  "trades": 0,
+  "wins": 0,
+  "losses": 0,
+  "consecutive_losses": 0,
+  "tripped": false,
+  "trip_reason": "",
+  "tripped_until": null,
+  "manual_stop": false,
+  "last_update": "2026-11-20T07:57:16+09:00"
+}

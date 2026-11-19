@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "symbol": "BTCUSDT",
+  "interval": 30,
+  "rule": {
+    "name": "후보1",
+    "kinds": [
+      "M1"
+    ],
+    "session": "asia",
+    "stop_atr": 3.0,
+    "target_r": 4.0,
+    "max_bars": 96
+  },
+  "created_at": "2026-11-19T05:49:16+00:00",
+  "updated_at": "2026-11-19T22:57:16+00:00",
+  "scan_bar": 1795125600000,
+  "scan_count": 16,
+  "initial_equity": 10000.0,
+  "equity": 10000.0,
+  "position": null,
+  "closed": [],
+  "stats": {
+    "trades": 0,
+    "wins": 0,
+    "losses": 0,
+    "win_rate_pct": null,
+    "net_pnl": 0,
+    "net_pct": 0.0,
+    "profit_factor": null,
+    "avg_r": null,
+    "r_sum": 0,
+    "mdd_pct": 0.0,
+    "max_losing_streak": 0,
+    "targets": 0,
+    "stops": 0,
+    "time_exits": 0,
+    "last_trade_at": null
+  },
+  "signals_seen": [],
+  "killswitch": {
+    "ok": true,
+    "reason": "정상",
+    "tripped": false,
+    "tripped_until": null,
+    "manual_stop": false,
+    "realized_pnl": 0.0,
+    "trades_today": 0,
+    "loss_pct": 0.0,
+    "rules": {
+      "daily_loss_pct": 3.0,
+      "max_consecutive_losses": 3,
+      "max_daily_trades": 20,
+      "volatility_pause_atr_pct": 2.5,
+      "cooldown_minutes": 30,
+      "min_equity_pct": 90.0
+    }
+  },
+  "last_scan": {
+    "ts": "2026-11-19T22:57:16+00:00",
+    "bar": "2026-11-19T22:00:00+00:00",
+    "action": "HOLD",
+    "events": [],
+    "price": 62133.7
+  }
+}
