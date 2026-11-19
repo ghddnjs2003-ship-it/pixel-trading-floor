@@ -30,6 +30,8 @@
   const CONTRACT = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';   // Tether USD (TRC20)
   const EXPLORER = 'https://tronscan.org/#/transaction/';
   const CAL_URL = 'data/calendar.json';
+  // 1순위 실시간 시황(Cloudflare Worker) / 2순위 저장소 스냅숏 — 환율 한 값 때문에 두 곳을 본다
+  const WORKER_URL = 'https://pixel-global.jooyon124.workers.dev/global.json';
   const GLOBAL_URL = 'data/global.json';
 
   const MIN_USDT = 500000;          // 50만 USDT 이상만 '고래'
@@ -230,7 +232,7 @@
 
   /* ---------------------------------------------------------------- 환율 */
 
-  // 글로벌 시황이 이미 받아 둔 원/달러를 먼저 쓰고, 없으면 data/global.json 을 직접 읽는다.
+  // 글로벌 시황이 이미 받아 둔 원/달러를 먼저 쓰고, 없으면 워커(실시간) → data/global.json(스냅숏) 순서로 직접 읽는다.
   function usdKrw() {
     const g = window.LiteGlobal;
     if (g && typeof g.rows === 'function') {
@@ -243,13 +245,26 @@
     return Number.isFinite(state.fx) && state.fx > 500 ? state.fx : null;
   }
 
+  const okFx = (v) => Number.isFinite(v) && v > 500 && v < 5000;
+
+  async function getJson(url) {
+    const res = await fetch(`${url}?_=${Date.now()}`, { cache: 'no-store', credentials: 'omit' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  }
+
   async function loadFx() {
     try {
-      const res = await fetch(`${GLOBAL_URL}?_=${Date.now()}`, { cache: 'no-store', credentials: 'omit' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      const v = Number(json && json.crypto && json.crypto.usdKrw);
-      if (Number.isFinite(v) && v > 500 && v < 5000) { state.fx = v; state.fxAt = Date.now(); }
+      // 1순위: 워커의 실시간 KRW=X (markets.fx.price)
+      const live = await getJson(WORKER_URL);
+      const v = Number(live && live.markets && live.markets.fx && live.markets.fx.price);
+      if (okFx(v)) { state.fx = v; state.fxAt = Date.now(); return; }
+    } catch (e) { /* 워커가 막히면 스냅숏으로 */ }
+    try {
+      // 2순위: 저장소 스냅숏의 usdKrw
+      const snap = await getJson(GLOBAL_URL);
+      const v = Number(snap && snap.crypto && snap.crypto.usdKrw);
+      if (okFx(v)) { state.fx = v; state.fxAt = Date.now(); }
     } catch (e) { /* 환율이 없으면 원화 칸을 비워 둔다 — 지어내지 않는다 */ } finally {
       paintAges();
     }

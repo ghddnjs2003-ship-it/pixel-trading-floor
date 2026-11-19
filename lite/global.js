@@ -4,22 +4,28 @@
    두 벌의 옷을 각자의 탭 톤에 맞춘다: 오피스는 검정+금색 픽셀 전광판, 스크리너는 거래소 톤(#0b0e13/#10151e).
 
    어디서 값을 받는가 (서버 없음)
-     · 미 선물 NQ·ES, 달러 인덱스, 원/달러 : data/global.json — GitHub Actions가 10분마다 야후 파이낸스에서
-       받아 저장소에 커밋한다(브라우저는 야후에 CORS로 직접 붙을 수 없다). 24시간 스파크도 그 파일에 들어 있다.
+     · 미 선물 NQ·ES, 달러 인덱스, 원/달러 : Cloudflare Worker — pixel-global.jooyon124.workers.dev/global.json
+       이 워커가 야후 파이낸스에서 직접 받아 45초 캐시로 내준다(브라우저는 야후에 CORS로 직접 붙을 수 없다).
+       24시간 스파크도 같은 응답에 들어 있고, 페이지는 1분마다 다시 받는다.
+     · 워커가 막히면 : data/global.json — GitHub Actions가 몇 시간에 한 번 야후에서 받아 저장소에 커밋한
+       스냅숏. 그 파일의 updatedAt이 곧 값의 나이다(그래서 오래된 스냅숏으로 물러나면 SYNC가 노랗게 바뀐다).
      · 김프 : 업비트 KRW-BTC + 코인베이스 BTC-USD + 원/달러 환율 → 브라우저가 직접 계산(30초)
      · BTC 도미넌스·ETH·총시총 : CoinGecko /api/v3/global (3분 캐싱)
      · 공포탐욕 : alternative.me/fng (10분 캐싱)
-   실시간 호출이 실패하면 data/global.json의 값으로 물러난다. 값이 30분보다 낡으면 SYNC 표시가 노랗게 바뀐다.
+   값이 30분보다 낡으면 SYNC 표시가 노랗게 바뀐다.
    투자 조언이 아니다. */
 
 (function () {
   'use strict';
 
+  // 1순위 실시간 시황(Cloudflare Worker, 45초 캐시 · CORS 허용) / 2순위 저장소 스냅숏
+  const WORKER_URL = 'https://pixel-global.jooyon124.workers.dev/global.json';
   const JSON_URL = 'data/global.json';
   const TICK_MS = 5000;
   // 업비트 REST는 Origin(사이트 주소) 단위로 1분에 10번 정도만 허용한다 — 모든 방문자가 같은 Origin을 쓰므로
   // 평소에는 웹소켓으로 받고, 웹소켓이 막힌 환경에서만 REST로 드문드문 받는다.
-  const DUE = { json: 5 * 60000, prices: 60000, krw: 60000, cg: 3 * 60000, fng: 10 * 60000, fx: 30 * 60000 };
+  // 워커가 45초 캐시로 내주므로 1분마다 받으면 화면에 있는 동안은 사실상 실시간이다
+  const DUE = { json: 60000, prices: 60000, krw: 60000, cg: 3 * 60000, fng: 10 * 60000, fx: 30 * 60000 };
   const STALE_MS = 30 * 60000;
 
   const SPEC = [
@@ -97,18 +103,37 @@
     try {
       await fn();
     } catch (error) {
-      // 값이 없다는 뜻일 뿐이다 — 화면은 지난 값이나 global.json으로 계속 돈다
+      // 값이 없다는 뜻일 뿐이다 — 화면은 지난 값이나 스냅숏(data/global.json)으로 계속 돈다
       console.warn('[글로벌 시황] ' + name + ' 갱신 실패:', error && error.message ? error.message : error);
     } finally {
       state.busy[name] = false;
     }
   }
 
+  // 1순위는 Cloudflare Worker의 실시간 응답. 워커가 막히거나 빈 응답이면 저장소 스냅숏으로 물러난다 —
+  // 그때는 값의 나이가 updatedAt에 그대로 남아 SYNC 표시가 노랗게 바뀐다.
   async function loadJson() {
-    const data = await getJSON(JSON_URL + '?t=' + Date.now());
+    let data = null;
+    try {
+      const w = await getJSON(WORKER_URL + '?t=' + Date.now(), 7000);
+      if (w && w.markets && Object.keys(w.markets).length) data = w;
+    } catch (error) {
+      console.warn('[글로벌 시황] 실시간 워커 응답 없음 — data/global.json으로 물러납니다:', error && error.message ? error.message : error);
+    }
+    if (!data) {
+      try {
+        data = await getJSON(JSON_URL + '?t=' + Date.now());
+      } catch (error) {
+        console.warn('[글로벌 시황] 스냅숏도 받지 못했습니다:', error && error.message ? error.message : error);
+        state.due.json = Date.now() + DUE.json;
+        return;
+      }
+    }
     if (data && data.markets) {
       state.markets = data.markets;
-      state.cryptoJson = data.crypto || {};
+      // 워커 응답에는 시장 4종만 있다 — 크립토 값은 화면이 직접 받는 실시간 값이 맡고,
+      // 스냅숏(폴백)에 실려 올 때만 받아 둔다. 빈 값으로 지난 값을 지우지는 않는다.
+      if (data.crypto && typeof data.crypto === 'object' && Object.keys(data.crypto).length) state.cryptoJson = data.crypto;
       const at = Date.parse(data.updatedAt || '');
       state.jsonAt = Number.isFinite(at) ? at : Date.now();
       state.ready = true;
@@ -138,7 +163,7 @@
       const price = num(ethUsd.value && ethUsd.value.price);
       if (price) { state.live.ethUsd = price; touched = true; }
     }
-    // 환율은 원/달러 카드와 같은 값을 쓴다 (global.json의 KRW=X → 없으면 er-api)
+    // 환율은 원/달러 카드와 같은 값을 쓴다 (워커의 KRW=X → 없으면 er-api)
     if (!state.live.fx && !num(state.cryptoJson.usdKrw)) await loadFx();
     if (touched) {
       state.liveAt = Date.now();
@@ -314,12 +339,12 @@
     };
 
     const fxEntry = market('fx');
-    // 표시 환율과 김프 계산 환율을 같게 — 원/달러 카드는 global.json의 KRW=X(실시간에 가까움),
+    // 표시 환율과 김프 계산 환율을 같게 — 원/달러 카드는 워커의 KRW=X(실시간에 가까움),
     // 그 값이 없을 때만 er-api 환율을 쓴다
     const fx = fxEntry.price != null ? fxEntry.price : (num(c.usdKrw) != null ? num(c.usdKrw) : num(L.fx));
     const btcUsd = num(L.btcUsd) != null ? num(L.btcUsd) : num(c.btcUsd);
     const ethUsd = num(L.ethUsd) != null ? num(L.ethUsd) : num(c.ethUsd);
-    // 김프는 같은 시점의 세 값으로만 계산한다 — 실시간 원화가 없으면 global.json이 함께 받아 둔
+    // 김프는 같은 시점의 세 값으로만 계산한다 — 실시간 원화가 없으면 스냅숏이 함께 받아 둔
     // 김프 값을 그대로 쓴다(신선한 달러에 낡은 원화를 섞으면 값이 튄다)
     const krwLive = num(L.btcKrw);
     const btcKrw = krwLive != null ? krwLive : num(c.btcKrw);
