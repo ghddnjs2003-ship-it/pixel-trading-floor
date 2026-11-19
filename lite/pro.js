@@ -122,7 +122,8 @@
     const [tick, oi, ratio] = await Promise.allSettled([
       getJSON(`${BASE}/v5/market/tickers?category=linear&symbol=${symbol}`),
       getJSON(`${BASE}/v5/market/open-interest?category=linear&symbol=${symbol}&intervalTime=1h&limit=24`),
-      getJSON(`${BASE}/v5/market/account-ratio?category=linear&symbol=${symbol}&period=1h&limit=1`),
+      /* Bybit account-ratio는 200에 빈 목록을 자주 준다 — 공용 로더(LiteRatio)가 Bybit 계정 → 종목 → Bitget → Binance 순으로 물러난다 */
+      (window.LiteRatio ? window.LiteRatio.load(symbol) : Promise.reject(new Error('비율 모듈 미로드'))),
     ]);
     if (seq !== flow.seq) { flow.loading = false; return; }
     const problems = [];
@@ -164,18 +165,15 @@
       if (data.oiUsd == null && rows.length && data.price) data.oiUsd = rows[rows.length - 1].value * data.price;
     } else problems.push('open-interest');
 
-    /* 롱/숏 계정 비율 */
-    if (ratio.status === 'fulfilled') {
-      const row = (ratio.value.list || [])[0];
-      if (row) {
-        const buy = num(row.buyRatio);
-        const sell = num(row.sellRatio);
-        if (buy != null && sell != null) {
-          data.longShare = buy;
-          data.shortShare = sell;
-          data.ratioAt = num(row.timestamp);
-        }
-      }
+    /* 롱/숏 계정 비율 — LiteRatio가 정규화한 값을 그대로 쓴다 */
+    if (ratio.status === 'fulfilled' && ratio.value) {
+      data.longShare = ratio.value.longShare;
+      data.shortShare = ratio.value.shortShare;
+      data.ratioAt = ratio.value.at;
+      data.lsSource = ratio.value.source;
+    } else if (ratio.status === 'fulfilled') {
+      data.lsError = (window.LiteRatio && window.LiteRatio.lastError) || '응답 비어 있음';
+      problems.push('account-ratio');
     } else problems.push('account-ratio');
 
     flow.data = data;
@@ -243,9 +241,10 @@
       $('#pf-bar-long').style.width = `${share * 100}%`;
       $('#pf-bar-short').style.width = `${(1 - share) * 100}%`;
       $('#pf-ratio').textContent = `비율 ${share > 0 ? (share / (1 - share)).toFixed(2) : '—'}`;
-      $('#pf-hint').textContent = share >= 0.55 ? '롱 우위 — 되돌림 주의'
-        : share <= 0.45 ? '숏 우위 — 숏스퀴즈 주의'
-          : '균형 구간';
+      $('#pf-hint').textContent = data.lsSource && data.lsSource !== 'Bybit' ? `${data.lsSource} 기준`
+        : share >= 0.55 ? '롱 우위 — 되돌림 주의'
+          : share <= 0.45 ? '숏 우위 — 숏스퀴즈 주의'
+            : '균형 구간';
     }
 
     /* 상태 줄 */
@@ -256,7 +255,8 @@
     } else {
       note.className = 'pf-note';
       const left = flow.partial && flow.partial.length ? ` · ${flow.partial.join('/')} 지연` : '';
-      note.innerHTML = `Bybit 선형 무기한 · 30초 갱신${left}<b>모의 전용</b>`;
+      const src = data.lsSource && data.lsSource !== 'Bybit' ? ` · 롱숏 ${data.lsSource}` : '';
+      note.innerHTML = `Bybit 선형 무기한 · 30초 갱신${left}${src}<b>모의 전용</b>`;
     }
   }
 

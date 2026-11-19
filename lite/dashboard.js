@@ -38,7 +38,7 @@
     active: false, built: false,
     symbol: 'BTCUSDT', frame: FRAMES[3],
     candles: [], loading: false, chartError: '',
-    summary: null, summaryLoading: false, summaryError: '',
+    summary: null, summaryLoading: false, summaryError: '', ls: null,
     levels: { support: null, resistance: null, basis: '' },
     scan: { rows: [], bySymbol: new Map(), at: 0, loading: false, error: '', expanded: false, query: '', sort: 'turnover', dir: -1, lastPaint: '' },
     whaleAt: 0,
@@ -489,9 +489,12 @@
       if (data.oiUsd == null && rows.length && data.price) data.oiUsd = rows[rows.length - 1].v * data.price;
     } catch (e) { /* OI 흐름이 없어도 규모는 표시된다 */ }
 
-    const ratio = await loadRatio(symbol);
-    if (ratio) { data.longShare = ratio; }
-    else problems.push(`account-ratio(${loadRatio.lastError || '응답 비어 있음'})`);
+    /* 롱/숏 비율은 따로(loadRatioCard) 받는다 — 시세·펀딩 표시가 비율 API를 기다리지 않게.
+       직전에 받아 둔 값이 있으면 그대로 들고 가서 화면이 '—'로 깜빡이지 않게 한다 */
+    if (state.ls && state.ls.symbol === symbol && state.ls.longShare != null) {
+      data.longShare = state.ls.longShare;
+      data.lsSource = state.ls.source;
+    }
     data.problems = problems;
 
     if (data.symbol === state.symbol) {
@@ -506,31 +509,29 @@
 
   async function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
-  /* 롱/숏 비율 — account-ratio가 가끔 HTTP 200에 빈 목록을 준다(불규칙). 짧게 몇 번 다시 부르고,
-     종목 기준(long-short-ratio)으로도 물러난다. 그래도 없으면 화면은 '—'를 유지하고 30초 주기로 다시 시도한다 */
+  /* 롱/숏 비율 — Bybit account-ratio가 HTTP 200에 빈 목록을 주는 일이 잦아 lite/ratio.js(LiteRatio)에 맡긴다.
+     LiteRatio는 Bybit 계정 → Bybit 종목 → Bitget → Binance 순으로 물러나며, 어느 쪽 값인지(lastSource)도 알려 준다.
+     끝내 값이 없으면 화면은 '—'를 유지하고 30초 주기로 다시 시도한다 */
   async function loadRatio(symbol) {
     loadRatio.lastError = '';
-    const periods = ['1h', '1h', '5min'];   // Bybit가 이따금 200에 빈 목록을 준다 — 기간을 바꿔가며 몇 번 다시 부른다
-    for (let attempt = 0; attempt < periods.length; attempt += 1) {
-      try {
-        const body = await getJSON(`${API}/account-ratio?category=linear&symbol=${symbol}&period=${periods[attempt]}&limit=1`);
-        const row = (body.list || [])[0];
-        const buy = num(row && row.buyRatio);
-        const sell = num(row && row.sellRatio);
-        if (buy != null && sell != null && buy + sell > 0) return buy / (buy + sell);
-        loadRatio.lastError = `계정기준 빈 목록(list=${(body.list || []).length})`;
-      } catch (e) { loadRatio.lastError = `계정기준 ${e && e.name ? e.name : '실패'}`; }
-      if (attempt < periods.length - 1) await sleep(1500);
-    }
-    try {
-      const body = await getJSON(`${API}/long-short-ratio?category=linear&symbol=${symbol}&period=1h&limit=1`);
-      const row = (body.list || [])[0];
-      const buy = num(row && row.buyRatio);
-      const sell = num(row && row.sellRatio);
-      if (buy != null && sell != null && buy + sell > 0) return buy / (buy + sell);
-      loadRatio.lastError += ` · 종목기준 비어 있음(list=${(body.list || []).length})`;
-    } catch (e) { loadRatio.lastError += ` · 종목기준 ${e && e.name ? e.name : '실패'}`; }
-    return null;
+    loadRatio.lastSource = '';
+    if (!window.LiteRatio) { loadRatio.lastError = '비율 모듈 미로드'; return null; }
+    const r = await window.LiteRatio.load(symbol);
+    loadRatio.lastError = window.LiteRatio.lastError || '';
+    loadRatio.lastSource = r ? r.source : '';
+    return r ? r.longShare : null;
+  }
+
+  /* 비율 카드만 따로 갱신 — 받아 오면 state.ls에 넣고 그 부분만 다시 그린다 */
+  async function loadRatioCard() {
+    if (loadRatioCard.busy) return;
+    loadRatioCard.busy = true;
+    const symbol = state.symbol;
+    const value = await loadRatio(symbol);
+    loadRatioCard.busy = false;
+    if (symbol !== state.symbol) return;
+    state.ls = { symbol, longShare: value, source: loadRatio.lastSource, error: loadRatio.lastError, at: Date.now() };
+    paintSummary();
   }
 
   function paintSummary() {
@@ -567,14 +568,16 @@
     const longEl = $('#dash-long');
     const shortEl = $('#dash-short');
     const barLong = $('#dash-ls-long');
-    if (d.longShare == null) {
+    const ls = state.ls && state.ls.symbol === d.symbol ? state.ls : null;
+    const lsShare = ls ? ls.longShare : (d.longShare != null ? d.longShare : null);
+    if (lsShare == null) {
       longEl.textContent = '롱 —';
       shortEl.textContent = '숏 —';
       barLong.style.width = '0%';
       const barShort = $('.dash-lsbar .ls-bar .short');
       if (barShort) { barShort.style.flex = '0 1 auto'; barShort.style.width = '0%'; }
     } else {
-      const share = Math.max(0, Math.min(1, d.longShare));
+      const share = Math.max(0, Math.min(1, lsShare));
       longEl.textContent = `롱 ${(share * 100).toFixed(0)}%`;
       shortEl.textContent = `숏 ${((1 - share) * 100).toFixed(0)}%`;
       barLong.style.width = `${share * 100}%`;
@@ -583,14 +586,18 @@
     }
 
     const note = $('#dash-flow-note');
+    const ratioMissing = ls ? ls.longShare == null : false;
     if (state.summaryError) { note.textContent = `${state.summaryError} · 30초 뒤 다시`; note.className = 'dash-flow-note is-error'; }
-    else if (d.problems && d.problems.length) {
-      const friendly = d.problems.map((p) => p.startsWith('tickers') ? '시세 스캐너 대기 중' : p.startsWith('account-ratio') ? '롱/숏 비율 갱신 중' : p).join(' · ');
-      note.textContent = `${friendly} · 다음 갱신에 다시`;
+    else if ((d.problems && d.problems.length) || ratioMissing) {
+      const list = (d.problems || []).map((p) => p.startsWith('tickers') ? '시세 스캐너 대기 중' : p);
+      if (ratioMissing) list.push('롱/숏 비율 갱신 중');
+      note.textContent = `${list.join(' · ')} · 다음 갱신에 다시`;
       note.className = 'dash-flow-note is-error';
     }
     else {
-      note.textContent = `Bybit 선형 무기한 · ${d.intervalHours || 8}시간 펀딩 · 30초 갱신 · 롱/숏 계정 기준`;
+      const src = (ls && ls.source) || d.lsSource || 'Bybit';
+      const lsSrc = src !== 'Bybit' ? `롱/숏 ${src} 계정 기준` : '롱/숏 계정 기준';
+      note.textContent = `Bybit 선형 무기한 · ${d.intervalHours || 8}시간 펀딩 · 30초 갱신 · ${lsSrc}`;
       note.className = 'dash-flow-note';
     }
 
@@ -1037,6 +1044,7 @@
     paintChartMessage('캔들을 불러오는 중…');
     loadCandles(true);
     loadSummary();
+    loadRatioCard();   // 종목을 바꾸면 롱/숏 비율도 그 종목으로 다시 받는다
     loadTaker();   // 테이커 비율은 종목을 따라간다 (강제청산 스트림은 시장 전체)
   }
 
@@ -1136,7 +1144,7 @@
   function startTimers() {
     stopTimers();
     state.timers.chart = setInterval(() => { if (canRun()) loadCandles(); }, CHART_MS);
-    state.timers.flow = setInterval(() => { if (canRun()) loadSummary(); }, FLOW_MS);
+    state.timers.flow = setInterval(() => { if (canRun()) { loadSummary(); loadRatioCard(); } }, FLOW_MS);
     state.timers.scan = setInterval(() => { if (canRun()) loadScanner(); }, SCAN_MS);
     state.timers.whale = setInterval(() => { if (canRun()) paintWhaleCard(); }, WHALE_MS);
     state.timers.chips = setInterval(() => { if (canRun()) paintChips(); }, CHIP_MS);
@@ -1165,6 +1173,7 @@
     if (!state.candles.length) paintChartMessage('캔들을 불러오는 중…');
     loadCandles(true);
     loadSummary();
+    loadRatioCard();
     loadScanner();
     paintWhaleCard();
     paintChips();
@@ -1179,6 +1188,7 @@
     if (document.visibilityState === 'visible') {
       loadCandles();
       loadSummary();
+      loadRatioCard();
       loadScanner();
       paintWhaleCard();
       paintChips();
