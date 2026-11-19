@@ -21,3 +21,9 @@ out/
 
 # AI 맥락 필터 캐시(실행 산출물 — 커밋하지 않는다. 프롬프트·응답 요약만 담긴다)
 data/ai_cache*.json
+
+# 모의매매 루프 실행 산출물(현재 포지션·통계·매 스캔 로그) — 실행하며 쌓이는 상태라 커밋하지 않는다
+data/paper_state.json
+data/paper_log.jsonl
+data/paper_killswitch.json
+backend/state/

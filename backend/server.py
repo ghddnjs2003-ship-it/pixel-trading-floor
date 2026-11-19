@@ -18,6 +18,7 @@ SUBSCRIBERS = set()
 SUBSCRIBERS_LOCK = threading.Lock()
 RUN_LOCK = threading.Lock()
 RUNNING = False
+PAPER_LOCK = threading.Lock()          # 모의매매 스캔은 한 번에 하나만(상태 파일 경합 방지)
 
 
 def publish(event):
@@ -122,8 +123,12 @@ class Handler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(ROOT), **kwargs)
 
     def do_GET(self):
-        if urlparse(self.path).path == "/api/stream":
+        path = urlparse(self.path).path
+        if path == "/api/stream":
             self.stream_events()
+            return
+        if path == "/api/paper":
+            self.handle_paper_status()
             return
         super().do_GET()
 
@@ -132,6 +137,9 @@ class Handler(SimpleHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == "/api/ai-filter":
             self.handle_ai_filter()
+            return
+        if path == "/api/paper/tick":
+            self.handle_paper_tick()
             return
         if path != "/api/analyze":
             self.send_error(404)
@@ -173,6 +181,27 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json(400, {"ok": False, "error": str(exc)})
         except Exception as exc:                       # 시세·AI 실패는 502로 알린다
             self.send_json(502, {"ok": False, "error": str(exc)})
+
+    def handle_paper_status(self):
+        """모의매매 현재 상태 — 포지션·통계·킬스위치·최근 로그(읽기 전용)."""
+        try:
+            from .paper_loop import paper_status
+            self.send_json(200, paper_status())
+        except Exception as exc:
+            self.send_json(502, {"ok": False, "error": str(exc)})
+
+    def handle_paper_tick(self):
+        """모의매매 1회 스캔 — 주문 없음. 시세를 받고 규칙·AI·킬스위치를 한 번 돌린다."""
+        if not PAPER_LOCK.acquire(blocking=False):
+            self.send_json(409, {"ok": False, "error": "이미 스캔이 진행 중입니다."})
+            return
+        try:
+            from .paper_loop import paper_tick
+            self.send_json(200, {"ok": True, "record": paper_tick()})
+        except Exception as exc:                       # 시세·AI 실패는 502로 알린다
+            self.send_json(502, {"ok": False, "error": str(exc)})
+        finally:
+            PAPER_LOCK.release()
 
     def stream_events(self):
         subscriber = queue.Queue(maxsize=256)

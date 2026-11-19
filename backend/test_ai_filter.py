@@ -227,6 +227,24 @@ class CacheAndErrorTests(unittest.TestCase):
         self.assertIsNone(verdict["error"])
         self.assertEqual(ai2.errors, 0)
 
+    def test_compare_can_split_inside_a_window(self):
+        """start_index를 주면 인샘플/아웃샘플 경계를 그 구간 안에서 다시 잡는다."""
+        from backend.ai_filter import compare, decide, nominee_setup
+        params, cfg = nominee_setup()
+        candles = candles_from(zigzag(n=400))
+        sigs = [m1_signal(candles, index=i) for i in (300, 320, 340)]
+        for n, s in enumerate(sigs):
+            s["time"] = candles[s["index"]]["t"]
+            s["side"] = "LONG" if n % 2 == 0 else "SHORT"
+        reviews = [{"time": s["time"], "side": s["side"],
+                    "ai": {"decision": decide({"loss_prob": 30}), "loss_prob": 30}} for s in sigs]
+        kept = [s for s in sigs if decide({"loss_prob": 30}) == "PASS"]
+        result = compare(candles, sigs, kept, reviews, cfg, params, split=0.5, start_index=300)
+        self.assertEqual(result["signals"]["total"], 3)
+        self.assertEqual(result["reviews"]["pass"], 3)
+        self.assertIn("is", result["baseline"])
+        self.assertIn("os", result["baseline"])
+
     def test_review_signals_keeps_only_pass(self):
         candles = candles_from(zigzag())
         series = prepare_series(candles)
@@ -248,6 +266,30 @@ class CacheAndErrorTests(unittest.TestCase):
         self.assertEqual(len(reviews), 2)
         self.assertEqual(len(kept), 1)
         self.assertEqual(reviews[1]["ai"]["decision"], "REJECT")
+
+
+class PromptTemplateTests(unittest.TestCase):
+    """교차 검증용 지시문 — 기본값은 30분 BTC 그대로, 종목·시간봉만 바뀐다."""
+
+    def test_default_prompt_is_unchanged(self):
+        from backend.ai_filter import SYSTEM_PROMPT, system_prompt
+        self.assertEqual(system_prompt(), SYSTEM_PROMPT)
+        self.assertIn("당신은 BTCUSDT 무기한 선물 30분봉 단타 후보의 문맥 심사역입니다.", SYSTEM_PROMPT)
+        self.assertIn("4H EMA50과 30분 EMA20/50", SYSTEM_PROMPT)
+        self.assertIn("loss_prob 60 이상이면 REJECT", SYSTEM_PROMPT)
+        self.assertNotIn("{symbol}", SYSTEM_PROMPT)
+        self.assertNotIn("{tf_label}", SYSTEM_PROMPT)
+        self.assertNotIn("{tf_ema}", SYSTEM_PROMPT)
+
+    def test_swaps_symbol_and_timeframe_only(self):
+        from backend.ai_filter import SYSTEM_PROMPT, system_prompt
+        eth = system_prompt("ETHUSDT", "30분봉")
+        hour = system_prompt("BTCUSDT", "1시간봉")
+        self.assertIn("당신은 ETHUSDT 무기한 선물 30분봉", eth)
+        self.assertIn("4H EMA50과 1시간 EMA20/50", hour)
+        # 루브릭(가중치·문턱·출력 형식)은 글자 하나도 바뀌지 않는다
+        self.assertEqual(eth.replace("ETHUSDT", "BTCUSDT"), SYSTEM_PROMPT)
+        self.assertEqual(hour.replace("1시간", "30분"), SYSTEM_PROMPT)
 
 
 class RandomControlTests(unittest.TestCase):

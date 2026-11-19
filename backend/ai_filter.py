@@ -40,14 +40,14 @@ from .strategy import Engine, Params, atr_series, ema_series, resample
 KST = timezone(timedelta(hours=9))
 CACHE_DIR = Path(__file__).resolve().parent.parent / "data"
 
-SYSTEM_PROMPT = """당신은 BTCUSDT 무기한 선물 30분봉 단타 후보의 문맥 심사역입니다.
+SYSTEM_PROMPT_TEMPLATE = """당신은 {symbol} 무기한 선물 {tf_label} 단타 후보의 문맥 심사역입니다.
 후보는 규칙 엔진(더블 S + MDS v7)이 세운 M1 자리이고, 진입은 다음 봉 시가, 손절·목표는 문맥 '거래구조'에 적힌 값입니다.
 당신이 답할 것은 하나입니다 — loss_prob: "이 후보가 목표에 닿기 전에 손절로 끝날 확률" 0~100.
 
 평가 기준(50에서 시작해 가감, 근거가 없으면 50 근처에 그대로 두세요):
 1. 목표 경로(가장 중요): 1R(손절폭과 같은 거리) 안쪽에 반대편 1H 매물대나 유동성 레벨이 버티면 +20. 1~1.5R 안쪽이면 +10.
    3~8 ATR 떨어진 장애물은 정상입니다 — 4R 목표(12 ATR)에는 장애물이 있는 게 보통이니 감점하지 마세요.
-2. 상위 추세: 4H EMA50과 30분 EMA20/50 배열이 신호와 반대면 +15, 순응하면 −10.
+2. 상위 추세: 4H EMA50과 {tf_ema} EMA20/50 배열이 신호와 반대면 +15, 순응하면 −10.
 3. 위치: 48·96봉 범위의 극단(상위 85%에서 롱, 하위 15%에서 숏)이면 추격 +10. 존 리테스트·EMA 근처 되돌림이면 −5.
 4. 소진: CCI 절대값 200 초과 +10, 볼린저 폭이 10봉 평균의 1.6배 초과 +10, 거래량 3배 이상 급증 봉 직후 +5.
 5. 변동성: ATR%가 0.15 미만이면 시간손절 위험 +10, 1.2 초과면 손절 대비 노이즈 +5.
@@ -58,6 +58,21 @@ SYSTEM_PROMPT = """당신은 BTCUSDT 무기한 선물 30분봉 단타 후보의 
 
 출력은 JSON 객체 하나만: {"loss_prob": 0~100 정수, "decision":"PASS"|"REJECT", "reason":"한국어 1~2문장, 숫자 근거 포함", "risk_flags":["..."]}
 뉴스·펀더멘털은 제공되지 않았으니 지어내지 마세요."""
+
+
+def system_prompt(symbol: str = "BTCUSDT", tf_label: str = "30분봉") -> str:
+    """심사 지시문 — 루브릭(가중치·문턱·출력 형식)은 30분 BTC에서 정한 그대로 두고,
+
+    문맥에 적히는 종목·시간봉 이름만 실제 시장으로 바꾼다("30분봉" → "1시간봉"). 추세 항의
+    "30분 EMA20/50"처럼 봉을 빼고 쓰는 자리는 "1시간 EMA20/50"으로 맞춘다.
+    기본값(system_prompt())은 이전 문자열과 같다(기존 캐시·테스트와 호환).
+    """
+    tf_ema = tf_label[:-1] if tf_label.endswith("봉") else tf_label
+    return (SYSTEM_PROMPT_TEMPLATE.replace("{tf_label}", tf_label)
+            .replace("{tf_ema}", tf_ema).replace("{symbol}", symbol))
+
+
+SYSTEM_PROMPT = system_prompt()      # 기본값(30분 BTC) 지시문
 
 
 # ----------------------------------------------------------------------------- 설정
@@ -75,6 +90,8 @@ class FilterConfig:
     recent_bars: int = 12
     loss_threshold: float = 60.0    # loss_prob가 이 값 이상이면 REJECT (인샘플에서 고른 운용점)
     prompt_version: str = "ctx-v2"
+    symbol: str = "BTCUSDT"         # 지시문·문맥에 적는 종목(타 종목 교차 검증용)
+    tf_label: str = "30분봉"         # 지시문에 적는 시간봉 이름
 
     def resolved(self) -> "FilterConfig":
         return FilterConfig(**{**asdict(self)})
@@ -500,7 +517,7 @@ class AIFilter:
         self.calls += 1
         t0 = time.monotonic()
         try:
-            raw = self._get_provider().complete(SYSTEM_PROMPT, prompt)
+            raw = self._get_provider().complete(system_prompt(self.cfg.symbol, self.cfg.tf_label), prompt)
             parsed = parse_decision(raw, self.cfg.loss_threshold)
         except ProviderError as exc:
             self.errors += 1
@@ -520,7 +537,8 @@ class AIFilter:
 def review_signals(candles: Sequence[Dict], signals: Sequence[Dict], ai: AIFilter,
                    series: Optional[Dict] = None, capture: Optional[Dict] = None,
                    log_every: int = 0, emit=None,
-                   trade_cfg: Optional[BacktestConfig] = None) -> Tuple[List[Dict], List[Dict]]:
+                   trade_cfg: Optional[BacktestConfig] = None,
+                   symbol: str = "BTCUSDT") -> Tuple[List[Dict], List[Dict]]:
     """신호마다 심사해 (통과 신호, 심사 기록)을 돌려준다. 기록은 신호 dict + ai 판정 + 문맥."""
     series = series if series is not None else prepare_series(candles)
     capture = capture or {}
@@ -528,7 +546,7 @@ def review_signals(candles: Sequence[Dict], signals: Sequence[Dict], ai: AIFilte
     reviews: List[Dict] = []
     for n, sig in enumerate(signals, 1):
         snap = capture.get(sig["index"])
-        context = build_context(candles, sig, snap, series, ai.cfg, trade_cfg=trade_cfg)
+        context = build_context(candles, sig, snap, series, ai.cfg, trade_cfg=trade_cfg, symbol=symbol)
         verdict = ai.review(sig, context)
         reviews.append({
             "index": sig["index"], "time": sig["time"], "side": sig["side"],
@@ -605,11 +623,16 @@ def random_control(trades: Sequence[Dict], kept_n: int, observed_avg_r: Optional
 
 def compare(candles: Sequence[Dict], signals: Sequence[Dict], kept: Sequence[Dict],
             reviews: Sequence[Dict], cfg: BacktestConfig, params: Params,
-            split: float = 0.6) -> Dict:
-    """필터 전/후를 같은 체결 모형으로 돌려 비교한다. 인샘플/아웃샘플을 따로 낸다."""
+            split: float = 0.6, start_index: int = 0) -> Dict:
+    """필터 전/후를 같은 체결 모형으로 돌려 비교한다. 인샘플/아웃샘플을 따로 낸다.
+
+    start_index > 0이면 그 봉부터를 한 구간으로 본다(최근 구간만 심사한 교차 검증용).
+    신호는 호출부에서 이미 그 구간만 넘기므로, 인샘플/아웃샘플 경계만 그 구간 안에서 다시 잡는다.
+    """
     base = simulate(candles, signals, cfg, params)
     filt = simulate(candles, kept, cfg, params)
-    split_t = candles[int(len(candles) * split)]["t"]
+    split_i = start_index + int((len(candles) - start_index) * split)
+    split_t = candles[min(len(candles) - 1, max(0, split_i))]["t"]
 
     def split_trades(trades):
         return ([t for t in trades if t["entry_time"] < split_t],
@@ -673,9 +696,11 @@ def compare(candles: Sequence[Dict], signals: Sequence[Dict], kept: Sequence[Dic
 
 def sweep_thresholds(candles: Sequence[Dict], signals: Sequence[Dict], reviews: Sequence[Dict],
                      cfg: BacktestConfig, params: Params, split: float = 0.6,
-                     thresholds: Sequence[float] = (45, 50, 55, 60, 65, 70, 80)) -> List[Dict]:
+                     thresholds: Sequence[float] = (45, 50, 55, 60, 65, 70, 80),
+                     start_index: int = 0) -> List[Dict]:
     """문턱별 필터 성과 — 운용점은 인샘플에서만 고르고, 아웃샘플은 그 문턱 그대로 확인한다."""
-    split_t = candles[int(len(candles) * split)]["t"]
+    split_i = start_index + int((len(candles) - start_index) * split)
+    split_t = candles[min(len(candles) - 1, max(0, split_i))]["t"]
     rows: List[Dict] = []
     for th in thresholds:
         kept = [s for s in signals

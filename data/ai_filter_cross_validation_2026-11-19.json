@@ -1,0 +1,1832 @@
+{
+ "title": "AI 맥락 필터 교차 검증 — 타 시간봉·ETH (문턱 60·같은 루브릭)",
+ "date": "2026-11-19",
+ "method": {
+  "rule": "후보1 — 엔진 M1 · 아시아(00-08 UTC) 진입 · 3ATR 손절 · 4R 목표 · N봉 시간청산",
+  "filter": "ai_filter.py 그대로 — loss_prob ≥ 60이면 REJECT, 프롬프트 루브릭 무변경",
+  "sample": "시장별 최근 후보 60건(40~80) · 호출 간격 2.0초 · 문맥 캐시",
+  "execution": "다음 봉 시가 진입 · 같은 봉 손절/목표 동시 도달 시 손절 우선 · 수수료 5bp·슬리피지 2bp",
+  "window": "각 시장의 첫 심사 후보 봉부터 마지막 봉까지(그 앞 신호는 체결하지 않음)"
+ },
+ "model": "gemini-3.5-flash-lite",
+ "threshold": 60.0,
+ "markets": {
+  "btc15": {
+   "market": "btc15",
+   "symbol": "BTCUSDT",
+   "timeframe": "15분봉",
+   "rule": "M1 · 아시아 3ATR · 4R · 96봉(24h)",
+   "data": {
+    "file": "data/btc_15m_45000.json",
+    "bars": 45000,
+    "from": "2025-08-05 01:45Z",
+    "to": "2026-11-19 03:30Z"
+   },
+   "window": {
+    "signals": 60,
+    "kept": 38,
+    "first": "2026-03-12 02:30Z",
+    "last": "2026-11-12 00:00Z",
+    "bars": 24077,
+    "span": "2026-03-12 02:30Z~2026-11-19 03:30Z"
+   },
+   "reviews": {
+    "count": 60,
+    "pass": 38,
+    "reject": 22,
+    "errors": 0,
+    "reject_pct": 36.7
+   },
+   "baseline": {
+    "all": {
+     "trades": 57,
+     "win": 35.1,
+     "pf": 0.9,
+     "net_pct": -4.37,
+     "avg_r": -0.08,
+     "mdd": 14.3,
+     "targets": 6,
+     "stops": 37,
+     "times": 14,
+     "boot": {
+      "mean": -0.08,
+      "lo": -0.519,
+      "hi": 0.386,
+      "p_positive": 0.335
+     }
+    },
+    "is": {
+     "trades": 35,
+     "win": 37.1,
+     "pf": 0.93,
+     "net_pct": -1.77,
+     "avg_r": -0.04,
+     "mdd": 9.95,
+     "targets": 3,
+     "stops": 22,
+     "times": 10,
+     "boot": {
+      "mean": -0.037,
+      "lo": -0.576,
+      "hi": 0.53,
+      "p_positive": 0.421
+     }
+    },
+    "os": {
+     "trades": 22,
+     "win": 31.8,
+     "pf": 0.85,
+     "net_pct": -2.6,
+     "avg_r": -0.15,
+     "mdd": 9.98,
+     "targets": 3,
+     "stops": 15,
+     "times": 4,
+     "boot": {
+      "mean": -0.149,
+      "lo": -0.877,
+      "hi": 0.709,
+      "p_positive": 0.33
+     }
+    }
+   },
+   "filtered": {
+    "all": {
+     "trades": 36,
+     "win": 36.1,
+     "pf": 0.91,
+     "net_pct": -2.59,
+     "avg_r": -0.08,
+     "mdd": 15.77,
+     "targets": 4,
+     "stops": 23,
+     "times": 9,
+     "boot": {
+      "mean": -0.085,
+      "lo": -0.614,
+      "hi": 0.48,
+      "p_positive": 0.374
+     }
+    },
+    "is": {
+     "trades": 20,
+     "win": 50.0,
+     "pf": 1.66,
+     "net_pct": 8.08,
+     "avg_r": 0.41,
+     "mdd": 3.42,
+     "targets": 3,
+     "stops": 10,
+     "times": 7,
+     "boot": {
+      "mean": 0.407,
+      "lo": -0.386,
+      "hi": 1.266,
+      "p_positive": 0.835
+     }
+    },
+    "os": {
+     "trades": 16,
+     "win": 18.8,
+     "pf": 0.31,
+     "net_pct": -10.67,
+     "avg_r": -0.7,
+     "mdd": 12.24,
+     "targets": 1,
+     "stops": 13,
+     "times": 2,
+     "boot": {
+      "mean": -0.699,
+      "lo": -1.248,
+      "hi": 0.096,
+      "p_positive": 0.041
+     }
+    }
+   },
+   "hit": {
+    "worst_decile": {
+     "n": 5,
+     "cut_r": -1.258,
+     "reviewed": 5,
+     "rejected": 1,
+     "reject_pct": 20.0
+    },
+    "four_r_winners": {
+     "n": 6,
+     "reviewed": 6,
+     "rejected": 2,
+     "reject_pct": 33.3
+    },
+    "all_trades": {
+     "n": 57,
+     "reviewed": 57,
+     "rejected": 21,
+     "reject_pct": 36.8
+    },
+    "losing_trades": {
+     "n": 37,
+     "reviewed": 37,
+     "rejected": 14,
+     "reject_pct": 37.8
+    },
+    "winning_trades": {
+     "n": 20,
+     "reviewed": 20,
+     "rejected": 7,
+     "reject_pct": 35.0
+    }
+   },
+   "random_control": {
+    "all": {
+     "kept_n": 36,
+     "observed_avg_r": -0.08,
+     "random_median": -0.077,
+     "random_p95": 0.205,
+     "p_value": 0.506
+    },
+    "is": {
+     "kept_n": 20,
+     "observed_avg_r": 0.41,
+     "random_median": -0.026,
+     "random_p95": 0.366,
+     "p_value": 0.037
+    },
+    "os": {
+     "kept_n": 16,
+     "observed_avg_r": -0.7,
+     "random_median": -0.105,
+     "random_p95": 0.238,
+     "p_value": 0.977
+    }
+   },
+   "sweep": [
+    {
+     "threshold": 45,
+     "kept": 2,
+     "rejected": 58,
+     "all": {
+      "trades": 2,
+      "win": 0.0,
+      "pf": 0.0,
+      "net_pct": -2.46,
+      "avg_r": -1.24,
+      "mdd": 2.46,
+      "targets": 0,
+      "stops": 2,
+      "times": 0,
+      "boot": {
+       "mean": -1.237,
+       "lo": null,
+       "hi": null,
+       "p_positive": null
+      }
+     },
+     "is": {
+      "trades": 1,
+      "win": 0.0,
+      "pf": 0.0,
+      "net_pct": -1.21,
+      "avg_r": -1.21,
+      "mdd": 1.21,
+      "targets": 0,
+      "stops": 1,
+      "times": 0,
+      "boot": {
+       "mean": -1.208,
+       "lo": null,
+       "hi": null,
+       "p_positive": null
+      }
+     },
+     "os": {
+      "trades": 1,
+      "win": 0.0,
+      "pf": 0.0,
+      "net_pct": -1.25,
+      "avg_r": -1.27,
+      "mdd": 2.46,
+      "targets": 0,
+      "stops": 1,
+      "times": 0,
+      "boot": {
+       "mean": -1.267,
+       "lo": null,
+       "hi": null,
+       "p_positive": null
+      }
+     }
+    },
+    {
+     "threshold": 50,
+     "kept": 30,
+     "rejected": 30,
+     "all": {
+      "trades": 29,
+      "win": 37.9,
+      "pf": 1.01,
+      "net_pct": 0.21,
+      "avg_r": -0.01,
+      "mdd": 10.25,
+      "targets": 3,
+      "stops": 18,
+      "times": 8,
+      "boot": {
+       "mean": -0.011,
+       "lo": -0.624,
+       "hi": 0.654,
+       "p_positive": 0.479
+      }
+     },
+     "is": {
+      "trades": 17,
+      "win": 47.1,
+      "pf": 1.57,
+      "net_pct": 6.24,
+      "avg_r": 0.37,
+      "mdd": 3.42,
+      "targets": 2,
+      "stops": 9,
+      "times": 6,
+      "boot": {
+       "mean": 0.373,
+       "lo": -0.454,
+       "hi": 1.268,
+       "p_positive": 0.798
+      }
+     },
+     "os": {
+      "trades": 12,
+      "win": 25.0,
+      "pf": 0.45,
+      "net_pct": -6.02,
+      "avg_r": -0.55,
+      "mdd": 8.15,
+      "targets": 1,
+      "stops": 9,
+      "times": 2,
+      "boot": {
+       "mean": -0.554,
+       "lo": -1.267,
+       "hi": 0.379,
+       "p_positive": 0.121
+      }
+     }
+    },
+    {
+     "threshold": 55,
+     "kept": 30,
+     "rejected": 30,
+     "all": {
+      "trades": 29,
+      "win": 37.9,
+      "pf": 1.01,
+      "net_pct": 0.21,
+      "avg_r": -0.01,
+      "mdd": 10.25,
+      "targets": 3,
+      "stops": 18,
+      "times": 8,
+      "boot": {
+       "mean": -0.011,
+       "lo": -0.624,
+       "hi": 0.654,
+       "p_positive": 0.479
+      }
+     },
+     "is": {
+      "trades": 17,
+      "win": 47.1,
+      "pf": 1.57,
+      "net_pct": 6.24,
+      "avg_r": 0.37,
+      "mdd": 3.42,
+      "targets": 2,
+      "stops": 9,
+      "times": 6,
+      "boot": {
+       "mean": 0.373,
+       "lo": -0.454,
+       "hi": 1.268,
+       "p_positive": 0.798
+      }
+     },
+     "os": {
+      "trades": 12,
+      "win": 25.0,
+      "pf": 0.45,
+      "net_pct": -6.02,
+      "avg_r": -0.55,
+      "mdd": 8.15,
+      "targets": 1,
+      "stops": 9,
+      "times": 2,
+      "boot": {
+       "mean": -0.554,
+       "lo": -1.267,
+       "hi": 0.379,
+       "p_positive": 0.121
+      }
+     }
+    },
+    {
+     "threshold": 60,
+     "kept": 38,
+     "rejected": 22,
+     "all": {
+      "trades": 36,
+      "win": 36.1,
+      "pf": 0.91,
+      "net_pct": -2.59,
+      "avg_r": -0.08,
+      "mdd": 15.77,
+      "targets": 4,
+      "stops": 23,
+      "times": 9,
+      "boot": {
+       "mean": -0.085,
+       "lo": -0.614,
+       "hi": 0.48,
+       "p_positive": 0.374
+      }
+     },
+     "is": {
+      "trades": 20,
+      "win": 50.0,
+      "pf": 1.66,
+      "net_pct": 8.08,
+      "avg_r": 0.41,
+      "mdd": 3.42,
+      "targets": 3,
+      "stops": 10,
+      "times": 7,
+      "boot": {
+       "mean": 0.407,
+       "lo": -0.386,
+       "hi": 1.266,
+       "p_positive": 0.835
+      }
+     },
+     "os": {
+      "trades": 16,
+      "win": 18.8,
+      "pf": 0.31,
+      "net_pct": -10.67,
+      "avg_r": -0.7,
+      "mdd": 12.24,
+      "targets": 1,
+      "stops": 13,
+      "times": 2,
+      "boot": {
+       "mean": -0.699,
+       "lo": -1.248,
+       "hi": 0.096,
+       "p_positive": 0.041
+      }
+     }
+    },
+    {
+     "threshold": 65,
+     "kept": 47,
+     "rejected": 13,
+     "all": {
+      "trades": 45,
+      "win": 37.8,
+      "pf": 0.92,
+      "net_pct": -2.5,
+      "avg_r": -0.06,
+      "mdd": 13.44,
+      "targets": 5,
+      "stops": 28,
+      "times": 12,
+      "boot": {
+       "mean": -0.063,
+       "lo": -0.572,
+       "hi": 0.477,
+       "p_positive": 0.394
+      }
+     },
+     "is": {
+      "trades": 27,
+      "win": 44.4,
+      "pf": 1.24,
+      "net_pct": 4.19,
+      "avg_r": 0.17,
+      "mdd": 5.53,
+      "targets": 3,
+      "stops": 15,
+      "times": 9,
+      "boot": {
+       "mean": 0.167,
+       "lo": -0.445,
+       "hi": 0.884,
+       "p_positive": 0.674
+      }
+     },
+     "os": {
+      "trades": 18,
+      "win": 27.8,
+      "pf": 0.56,
+      "net_pct": -6.69,
+      "avg_r": -0.41,
+      "mdd": 8.88,
+      "targets": 2,
+      "stops": 13,
+      "times": 3,
+      "boot": {
+       "mean": -0.408,
+       "lo": -1.084,
+       "hi": 0.429,
+       "p_positive": 0.143
+      }
+     }
+    },
+    {
+     "threshold": 70,
+     "kept": 59,
+     "rejected": 1,
+     "all": {
+      "trades": 56,
+      "win": 35.7,
+      "pf": 0.92,
+      "net_pct": -3.19,
+      "avg_r": -0.06,
+      "mdd": 14.3,
+      "targets": 6,
+      "stops": 36,
+      "times": 14,
+      "boot": {
+       "mean": -0.06,
+       "lo": -0.505,
+       "hi": 0.397,
+       "p_positive": 0.384
+      }
+     },
+     "is": {
+      "trades": 34,
+      "win": 38.2,
+      "pf": 0.98,
+      "net_pct": -0.55,
+      "avg_r": -0.0,
+      "mdd": 8.83,
+      "targets": 3,
+      "stops": 21,
+      "times": 10,
+      "boot": {
+       "mean": -0.002,
+       "lo": -0.539,
+       "hi": 0.564,
+       "p_positive": 0.465
+      }
+     },
+     "os": {
+      "trades": 22,
+      "win": 31.8,
+      "pf": 0.85,
+      "net_pct": -2.63,
+      "avg_r": -0.15,
+      "mdd": 9.98,
+      "targets": 3,
+      "stops": 15,
+      "times": 4,
+      "boot": {
+       "mean": -0.149,
+       "lo": -0.877,
+       "hi": 0.709,
+       "p_positive": 0.33
+      }
+     }
+    },
+    {
+     "threshold": 80,
+     "kept": 60,
+     "rejected": 0,
+     "all": {
+      "trades": 57,
+      "win": 35.1,
+      "pf": 0.9,
+      "net_pct": -4.37,
+      "avg_r": -0.08,
+      "mdd": 14.3,
+      "targets": 6,
+      "stops": 37,
+      "times": 14,
+      "boot": {
+       "mean": -0.08,
+       "lo": -0.519,
+       "hi": 0.386,
+       "p_positive": 0.335
+      }
+     },
+     "is": {
+      "trades": 35,
+      "win": 37.1,
+      "pf": 0.93,
+      "net_pct": -1.77,
+      "avg_r": -0.04,
+      "mdd": 9.95,
+      "targets": 3,
+      "stops": 22,
+      "times": 10,
+      "boot": {
+       "mean": -0.037,
+       "lo": -0.576,
+       "hi": 0.53,
+       "p_positive": 0.421
+      }
+     },
+     "os": {
+      "trades": 22,
+      "win": 31.8,
+      "pf": 0.85,
+      "net_pct": -2.6,
+      "avg_r": -0.15,
+      "mdd": 9.98,
+      "targets": 3,
+      "stops": 15,
+      "times": 4,
+      "boot": {
+       "mean": -0.149,
+       "lo": -0.877,
+       "hi": 0.709,
+       "p_positive": 0.33
+      }
+     }
+    }
+   ],
+   "meta": {
+    "model": "gemini-3.5-flash-lite",
+    "threshold": 60.0,
+    "calls": 2,
+    "cache_hits": 58,
+    "errors": 0,
+    "budget_hits": 0,
+    "avg_latency_s": 1.12,
+    "wall_s": 3.9
+   }
+  },
+  "btc60": {
+   "market": "btc60",
+   "symbol": "BTCUSDT",
+   "timeframe": "1시간봉",
+   "rule": "M1 · 아시아 3ATR · 4R · 48봉(48h)",
+   "data": {
+    "file": "data/btc_60m_65000.json",
+    "bars": 64208,
+    "from": "2019-07-10 11:00Z",
+    "to": "2026-11-19 03:00Z"
+   },
+   "window": {
+    "signals": 60,
+    "kept": 46,
+    "first": "2024-04-29 01:00Z",
+    "last": "2026-11-09 01:00Z",
+    "bars": 22308,
+    "span": "2024-04-29 01:00Z~2026-11-19 03:00Z"
+   },
+   "reviews": {
+    "count": 60,
+    "pass": 46,
+    "reject": 14,
+    "errors": 0,
+    "reject_pct": 23.3
+   },
+   "baseline": {
+    "all": {
+     "trades": 59,
+     "win": 35.6,
+     "pf": 0.78,
+     "net_pct": -7.93,
+     "avg_r": -0.13,
+     "mdd": 13.57,
+     "targets": 3,
+     "stops": 34,
+     "times": 22,
+     "boot": {
+      "mean": -0.131,
+      "lo": -0.466,
+      "hi": 0.203,
+      "p_positive": 0.229
+     }
+    },
+    "is": {
+     "trades": 37,
+     "win": 32.4,
+     "pf": 0.49,
+     "net_pct": -11.63,
+     "avg_r": -0.33,
+     "mdd": 11.63,
+     "targets": 0,
+     "stops": 22,
+     "times": 15,
+     "boot": {
+      "mean": -0.328,
+      "lo": -0.648,
+      "hi": 0.015,
+      "p_positive": 0.029
+     }
+    },
+    "os": {
+     "trades": 22,
+     "win": 40.9,
+     "pf": 1.29,
+     "net_pct": 3.7,
+     "avg_r": 0.2,
+     "mdd": 13.57,
+     "targets": 3,
+     "stops": 12,
+     "times": 7,
+     "boot": {
+      "mean": 0.202,
+      "lo": -0.491,
+      "hi": 0.971,
+      "p_positive": 0.692
+     }
+    }
+   },
+   "filtered": {
+    "all": {
+     "trades": 45,
+     "win": 33.3,
+     "pf": 0.62,
+     "net_pct": -10.55,
+     "avg_r": -0.24,
+     "mdd": 11.35,
+     "targets": 1,
+     "stops": 26,
+     "times": 18,
+     "boot": {
+      "mean": -0.24,
+      "lo": -0.56,
+      "hi": 0.122,
+      "p_positive": 0.087
+     }
+    },
+    "is": {
+     "trades": 27,
+     "win": 29.6,
+     "pf": 0.46,
+     "net_pct": -9.21,
+     "avg_r": -0.35,
+     "mdd": 9.21,
+     "targets": 0,
+     "stops": 16,
+     "times": 11,
+     "boot": {
+      "mean": -0.352,
+      "lo": -0.711,
+      "hi": 0.034,
+      "p_positive": 0.038
+     }
+    },
+    "os": {
+     "trades": 18,
+     "win": 38.9,
+     "pf": 0.87,
+     "net_pct": -1.34,
+     "avg_r": -0.07,
+     "mdd": 11.35,
+     "targets": 1,
+     "stops": 10,
+     "times": 7,
+     "boot": {
+      "mean": -0.073,
+      "lo": -0.683,
+      "hi": 0.64,
+      "p_positive": 0.381
+     }
+    }
+   },
+   "hit": {
+    "worst_decile": {
+     "n": 5,
+     "cut_r": -1.116,
+     "reviewed": 5,
+     "rejected": 0,
+     "reject_pct": 0.0
+    },
+    "four_r_winners": {
+     "n": 3,
+     "reviewed": 3,
+     "rejected": 2,
+     "reject_pct": 66.7
+    },
+    "all_trades": {
+     "n": 59,
+     "reviewed": 59,
+     "rejected": 14,
+     "reject_pct": 23.7
+    },
+    "losing_trades": {
+     "n": 38,
+     "reviewed": 38,
+     "rejected": 8,
+     "reject_pct": 21.1
+    },
+    "winning_trades": {
+     "n": 21,
+     "reviewed": 21,
+     "rejected": 6,
+     "reject_pct": 28.6
+    }
+   },
+   "random_control": {
+    "all": {
+     "kept_n": 45,
+     "observed_avg_r": -0.24,
+     "random_median": -0.128,
+     "random_p95": 0.025,
+     "p_value": 0.854
+    },
+    "is": {
+     "kept_n": 27,
+     "observed_avg_r": -0.35,
+     "random_median": -0.328,
+     "random_p95": -0.166,
+     "p_value": 0.584
+    },
+    "os": {
+     "kept_n": 18,
+     "observed_avg_r": -0.07,
+     "random_median": 0.21,
+     "random_p95": 0.485,
+     "p_value": 0.928
+    }
+   },
+   "sweep": [
+    {
+     "threshold": 45,
+     "kept": 3,
+     "rejected": 57,
+     "all": {
+      "trades": 3,
+      "win": 66.7,
+      "pf": 7.16,
+      "net_pct": 3.82,
+      "avg_r": 1.28,
+      "mdd": 0.62,
+      "targets": 1,
+      "stops": 0,
+      "times": 2,
+      "boot": {
+       "mean": 1.277,
+       "lo": null,
+       "hi": null,
+       "p_positive": null
+      }
+     },
+     "is": {
+      "trades": 0,
+      "win": null,
+      "pf": null,
+      "net_pct": 0.0,
+      "avg_r": null,
+      "mdd": 0.0,
+      "targets": 0,
+      "stops": 0,
+      "times": 0,
+      "boot": {
+       "mean": null,
+       "lo": null,
+       "hi": null,
+       "p_positive": null
+      }
+     },
+     "os": {
+      "trades": 3,
+      "win": 66.7,
+      "pf": 7.16,
+      "net_pct": 3.82,
+      "avg_r": 1.28,
+      "mdd": 0.62,
+      "targets": 1,
+      "stops": 0,
+      "times": 2,
+      "boot": {
+       "mean": 1.277,
+       "lo": null,
+       "hi": null,
+       "p_positive": null
+      }
+     }
+    },
+    {
+     "threshold": 50,
+     "kept": 36,
+     "rejected": 24,
+     "all": {
+      "trades": 35,
+      "win": 34.3,
+      "pf": 0.66,
+      "net_pct": -7.26,
+      "avg_r": -0.21,
+      "mdd": 8.09,
+      "targets": 1,
+      "stops": 20,
+      "times": 14,
+      "boot": {
+       "mean": -0.208,
+       "lo": -0.596,
+       "hi": 0.229,
+       "p_positive": 0.149
+      }
+     },
+     "is": {
+      "trades": 20,
+      "win": 35.0,
+      "pf": 0.6,
+      "net_pct": -4.67,
+      "avg_r": -0.23,
+      "mdd": 4.67,
+      "targets": 0,
+      "stops": 11,
+      "times": 9,
+      "boot": {
+       "mean": -0.234,
+       "lo": -0.672,
+       "hi": 0.244,
+       "p_positive": 0.165
+      }
+     },
+     "os": {
+      "trades": 15,
+      "win": 33.3,
+      "pf": 0.74,
+      "net_pct": -2.59,
+      "avg_r": -0.17,
+      "mdd": 8.09,
+      "targets": 1,
+      "stops": 9,
+      "times": 5,
+      "boot": {
+       "mean": -0.173,
+       "lo": -0.792,
+       "hi": 0.654,
+       "p_positive": 0.31
+      }
+     }
+    },
+    {
+     "threshold": 55,
+     "kept": 36,
+     "rejected": 24,
+     "all": {
+      "trades": 35,
+      "win": 34.3,
+      "pf": 0.66,
+      "net_pct": -7.26,
+      "avg_r": -0.21,
+      "mdd": 8.09,
+      "targets": 1,
+      "stops": 20,
+      "times": 14,
+      "boot": {
+       "mean": -0.208,
+       "lo": -0.596,
+       "hi": 0.229,
+       "p_positive": 0.149
+      }
+     },
+     "is": {
+      "trades": 20,
+      "win": 35.0,
+      "pf": 0.6,
+      "net_pct": -4.67,
+      "avg_r": -0.23,
+      "mdd": 4.67,
+      "targets": 0,
+      "stops": 11,
+      "times": 9,
+      "boot": {
+       "mean": -0.234,
+       "lo": -0.672,
+       "hi": 0.244,
+       "p_positive": 0.165
+      }
+     },
+     "os": {
+      "trades": 15,
+      "win": 33.3,
+      "pf": 0.74,
+      "net_pct": -2.59,
+      "avg_r": -0.17,
+      "mdd": 8.09,
+      "targets": 1,
+      "stops": 9,
+      "times": 5,
+      "boot": {
+       "mean": -0.173,
+       "lo": -0.792,
+       "hi": 0.654,
+       "p_positive": 0.31
+      }
+     }
+    },
+    {
+     "threshold": 60,
+     "kept": 46,
+     "rejected": 14,
+     "all": {
+      "trades": 45,
+      "win": 33.3,
+      "pf": 0.62,
+      "net_pct": -10.55,
+      "avg_r": -0.24,
+      "mdd": 11.35,
+      "targets": 1,
+      "stops": 26,
+      "times": 18,
+      "boot": {
+       "mean": -0.24,
+       "lo": -0.56,
+       "hi": 0.122,
+       "p_positive": 0.087
+      }
+     },
+     "is": {
+      "trades": 27,
+      "win": 29.6,
+      "pf": 0.46,
+      "net_pct": -9.21,
+      "avg_r": -0.35,
+      "mdd": 9.21,
+      "targets": 0,
+      "stops": 16,
+      "times": 11,
+      "boot": {
+       "mean": -0.352,
+       "lo": -0.711,
+       "hi": 0.034,
+       "p_positive": 0.038
+      }
+     },
+     "os": {
+      "trades": 18,
+      "win": 38.9,
+      "pf": 0.87,
+      "net_pct": -1.34,
+      "avg_r": -0.07,
+      "mdd": 11.35,
+      "targets": 1,
+      "stops": 10,
+      "times": 7,
+      "boot": {
+       "mean": -0.073,
+       "lo": -0.683,
+       "hi": 0.64,
+       "p_positive": 0.381
+      }
+     }
+    },
+    {
+     "threshold": 65,
+     "kept": 49,
+     "rejected": 11,
+     "all": {
+      "trades": 48,
+      "win": 35.4,
+      "pf": 0.74,
+      "net_pct": -7.63,
+      "avg_r": -0.16,
+      "mdd": 9.87,
+      "targets": 2,
+      "stops": 27,
+      "times": 19,
+      "boot": {
+       "mean": -0.157,
+       "lo": -0.505,
+       "hi": 0.255,
+       "p_positive": 0.193
+      }
+     },
+     "is": {
+      "trades": 28,
+      "win": 32.1,
+      "pf": 0.49,
+      "net_pct": -8.81,
+      "avg_r": -0.32,
+      "mdd": 8.81,
+      "targets": 0,
+      "stops": 16,
+      "times": 12,
+      "boot": {
+       "mean": -0.324,
+       "lo": -0.672,
+       "hi": 0.059,
+       "p_positive": 0.046
+      }
+     },
+     "os": {
+      "trades": 20,
+      "win": 40.0,
+      "pf": 1.1,
+      "net_pct": 1.18,
+      "avg_r": 0.08,
+      "mdd": 9.87,
+      "targets": 2,
+      "stops": 11,
+      "times": 7,
+      "boot": {
+       "mean": 0.077,
+       "lo": -0.552,
+       "hi": 0.83,
+       "p_positive": 0.551
+      }
+     }
+    },
+    {
+     "threshold": 70,
+     "kept": 58,
+     "rejected": 2,
+     "all": {
+      "trades": 57,
+      "win": 36.8,
+      "pf": 0.83,
+      "net_pct": -5.94,
+      "avg_r": -0.1,
+      "mdd": 11.7,
+      "targets": 3,
+      "stops": 32,
+      "times": 22,
+      "boot": {
+       "mean": -0.098,
+       "lo": -0.449,
+       "hi": 0.287,
+       "p_positive": 0.282
+      }
+     },
+     "is": {
+      "trades": 35,
+      "win": 34.3,
+      "pf": 0.54,
+      "net_pct": -9.72,
+      "avg_r": -0.29,
+      "mdd": 9.72,
+      "targets": 0,
+      "stops": 20,
+      "times": 15,
+      "boot": {
+       "mean": -0.286,
+       "lo": -0.607,
+       "hi": 0.068,
+       "p_positive": 0.052
+      }
+     },
+     "os": {
+      "trades": 22,
+      "win": 40.9,
+      "pf": 1.29,
+      "net_pct": 3.78,
+      "avg_r": 0.2,
+      "mdd": 11.7,
+      "targets": 3,
+      "stops": 12,
+      "times": 7,
+      "boot": {
+       "mean": 0.202,
+       "lo": -0.491,
+       "hi": 0.971,
+       "p_positive": 0.692
+      }
+     }
+    },
+    {
+     "threshold": 80,
+     "kept": 60,
+     "rejected": 0,
+     "all": {
+      "trades": 59,
+      "win": 35.6,
+      "pf": 0.78,
+      "net_pct": -7.93,
+      "avg_r": -0.13,
+      "mdd": 13.57,
+      "targets": 3,
+      "stops": 34,
+      "times": 22,
+      "boot": {
+       "mean": -0.131,
+       "lo": -0.466,
+       "hi": 0.203,
+       "p_positive": 0.229
+      }
+     },
+     "is": {
+      "trades": 37,
+      "win": 32.4,
+      "pf": 0.49,
+      "net_pct": -11.63,
+      "avg_r": -0.33,
+      "mdd": 11.63,
+      "targets": 0,
+      "stops": 22,
+      "times": 15,
+      "boot": {
+       "mean": -0.328,
+       "lo": -0.648,
+       "hi": 0.015,
+       "p_positive": 0.029
+      }
+     },
+     "os": {
+      "trades": 22,
+      "win": 40.9,
+      "pf": 1.29,
+      "net_pct": 3.7,
+      "avg_r": 0.2,
+      "mdd": 13.57,
+      "targets": 3,
+      "stops": 12,
+      "times": 7,
+      "boot": {
+       "mean": 0.202,
+       "lo": -0.491,
+       "hi": 0.971,
+       "p_positive": 0.692
+      }
+     }
+    }
+   ],
+   "meta": {
+    "model": "gemini-3.5-flash-lite",
+    "threshold": 60.0,
+    "calls": 5,
+    "cache_hits": 115,
+    "errors": 0,
+    "budget_hits": 0,
+    "avg_latency_s": 1.77,
+    "wall_s": 8.3
+   }
+  },
+  "eth30": {
+   "market": "eth30",
+   "symbol": "ETHUSDT",
+   "timeframe": "30분봉",
+   "rule": "M1 · 아시아 3ATR · 4R · 96봉(48h)",
+   "data": {
+    "file": "data/eth_15m_45000.json",
+    "bars": 22613,
+    "from": "2025-08-05 01:30Z",
+    "to": "2026-11-19 03:30Z"
+   },
+   "window": {
+    "signals": 60,
+    "kept": 45,
+    "first": "2025-09-08 00:00Z",
+    "last": "2026-11-17 04:30Z",
+    "bars": 20984,
+    "span": "2025-09-08 00:00Z~2026-11-19 03:30Z"
+   },
+   "reviews": {
+    "count": 60,
+    "pass": 45,
+    "reject": 15,
+    "errors": 0,
+    "reject_pct": 25.0
+   },
+   "baseline": {
+    "all": {
+     "trades": 57,
+     "win": 38.6,
+     "pf": 1.07,
+     "net_pct": 2.58,
+     "avg_r": 0.06,
+     "mdd": 10.26,
+     "targets": 4,
+     "stops": 30,
+     "times": 23,
+     "boot": {
+      "mean": 0.057,
+      "lo": -0.332,
+      "hi": 0.461,
+      "p_positive": 0.603
+     }
+    },
+    "is": {
+     "trades": 29,
+     "win": 44.8,
+     "pf": 1.68,
+     "net_pct": 10.41,
+     "avg_r": 0.36,
+     "mdd": 6.21,
+     "targets": 4,
+     "stops": 12,
+     "times": 13,
+     "boot": {
+      "mean": 0.357,
+      "lo": -0.249,
+      "hi": 1.017,
+      "p_positive": 0.861
+     }
+    },
+    "os": {
+     "trades": 28,
+     "win": 32.1,
+     "pf": 0.65,
+     "net_pct": -7.83,
+     "avg_r": -0.25,
+     "mdd": 10.26,
+     "targets": 0,
+     "stops": 18,
+     "times": 10,
+     "boot": {
+      "mean": -0.254,
+      "lo": -0.716,
+      "hi": 0.251,
+      "p_positive": 0.155
+     }
+    }
+   },
+   "filtered": {
+    "all": {
+     "trades": 43,
+     "win": 39.5,
+     "pf": 1.22,
+     "net_pct": 6.16,
+     "avg_r": 0.15,
+     "mdd": 8.67,
+     "targets": 4,
+     "stops": 22,
+     "times": 17,
+     "boot": {
+      "mean": 0.153,
+      "lo": -0.331,
+      "hi": 0.687,
+      "p_positive": 0.695
+     }
+    },
+    "is": {
+     "trades": 24,
+     "win": 41.7,
+     "pf": 1.63,
+     "net_pct": 8.84,
+     "avg_r": 0.37,
+     "mdd": 6.57,
+     "targets": 4,
+     "stops": 11,
+     "times": 9,
+     "boot": {
+      "mean": 0.37,
+      "lo": -0.359,
+      "hi": 1.155,
+      "p_positive": 0.832
+     }
+    },
+    "os": {
+     "trades": 19,
+     "win": 36.8,
+     "pf": 0.81,
+     "net_pct": -2.67,
+     "avg_r": -0.12,
+     "mdd": 8.67,
+     "targets": 0,
+     "stops": 11,
+     "times": 8,
+     "boot": {
+      "mean": -0.122,
+      "lo": -0.681,
+      "hi": 0.49,
+      "p_positive": 0.355
+     }
+    }
+   },
+   "hit": {
+    "worst_decile": {
+     "n": 5,
+     "cut_r": -1.156,
+     "reviewed": 5,
+     "rejected": 2,
+     "reject_pct": 40.0
+    },
+    "four_r_winners": {
+     "n": 4,
+     "reviewed": 4,
+     "rejected": 0,
+     "reject_pct": 0.0
+    },
+    "all_trades": {
+     "n": 57,
+     "reviewed": 57,
+     "rejected": 14,
+     "reject_pct": 24.6
+    },
+    "losing_trades": {
+     "n": 35,
+     "reviewed": 35,
+     "rejected": 9,
+     "reject_pct": 25.7
+    },
+    "winning_trades": {
+     "n": 22,
+     "reviewed": 22,
+     "rejected": 5,
+     "reject_pct": 22.7
+    }
+   },
+   "random_control": {
+    "all": {
+     "kept_n": 43,
+     "observed_avg_r": 0.15,
+     "random_median": 0.061,
+     "random_p95": 0.249,
+     "p_value": 0.236
+    },
+    "is": {
+     "kept_n": 24,
+     "observed_avg_r": 0.37,
+     "random_median": 0.369,
+     "random_p95": 0.581,
+     "p_value": 0.494
+    },
+    "os": {
+     "kept_n": 19,
+     "observed_avg_r": -0.12,
+     "random_median": -0.249,
+     "random_p95": 0.022,
+     "p_value": 0.231
+    }
+   },
+   "sweep": [
+    {
+     "threshold": 45,
+     "kept": 7,
+     "rejected": 53,
+     "all": {
+      "trades": 7,
+      "win": 28.6,
+      "pf": 1.09,
+      "net_pct": 0.49,
+      "avg_r": 0.09,
+      "mdd": 4.3,
+      "targets": 1,
+      "stops": 5,
+      "times": 1,
+      "boot": {
+       "mean": 0.088,
+       "lo": -1.098,
+       "hi": 1.72,
+       "p_positive": 0.568
+      }
+     },
+     "is": {
+      "trades": 3,
+      "win": 66.7,
+      "pf": 5.48,
+      "net_pct": 5.01,
+      "avg_r": 1.67,
+      "mdd": 1.08,
+      "targets": 1,
+      "stops": 1,
+      "times": 1,
+      "boot": {
+       "mean": 1.665,
+       "lo": null,
+       "hi": null,
+       "p_positive": null
+      }
+     },
+     "os": {
+      "trades": 4,
+      "win": 0.0,
+      "pf": 0.0,
+      "net_pct": -4.52,
+      "avg_r": -1.09,
+      "mdd": 3.28,
+      "targets": 0,
+      "stops": 4,
+      "times": 0,
+      "boot": {
+       "mean": -1.094,
+       "lo": null,
+       "hi": null,
+       "p_positive": null
+      }
+     }
+    },
+    {
+     "threshold": 50,
+     "kept": 34,
+     "rejected": 26,
+     "all": {
+      "trades": 33,
+      "win": 36.4,
+      "pf": 1.18,
+      "net_pct": 3.94,
+      "avg_r": 0.13,
+      "mdd": 9.25,
+      "targets": 4,
+      "stops": 17,
+      "times": 12,
+      "boot": {
+       "mean": 0.132,
+       "lo": -0.425,
+       "hi": 0.76,
+       "p_positive": 0.674
+      }
+     },
+     "is": {
+      "trades": 23,
+      "win": 43.5,
+      "pf": 1.78,
+      "net_pct": 10.13,
+      "avg_r": 0.44,
+      "mdd": 5.47,
+      "targets": 4,
+      "stops": 10,
+      "times": 9,
+      "boot": {
+       "mean": 0.437,
+       "lo": -0.295,
+       "hi": 1.242,
+       "p_positive": 0.859
+      }
+     },
+     "os": {
+      "trades": 10,
+      "win": 20.0,
+      "pf": 0.29,
+      "net_pct": -6.19,
+      "avg_r": -0.57,
+      "mdd": 6.78,
+      "targets": 0,
+      "stops": 7,
+      "times": 3,
+      "boot": {
+       "mean": -0.572,
+       "lo": -1.082,
+       "hi": 0.115,
+       "p_positive": 0.052
+      }
+     }
+    },
+    {
+     "threshold": 55,
+     "kept": 35,
+     "rejected": 25,
+     "all": {
+      "trades": 34,
+      "win": 35.3,
+      "pf": 1.12,
+      "net_pct": 2.8,
+      "avg_r": 0.1,
+      "mdd": 10.25,
+      "targets": 4,
+      "stops": 18,
+      "times": 12,
+      "boot": {
+       "mean": 0.095,
+       "lo": -0.447,
+       "hi": 0.707,
+       "p_positive": 0.627
+      }
+     },
+     "is": {
+      "trades": 23,
+      "win": 43.5,
+      "pf": 1.78,
+      "net_pct": 10.13,
+      "avg_r": 0.44,
+      "mdd": 5.47,
+      "targets": 4,
+      "stops": 10,
+      "times": 9,
+      "boot": {
+       "mean": 0.437,
+       "lo": -0.295,
+       "hi": 1.242,
+       "p_positive": 0.859
+      }
+     },
+     "os": {
+      "trades": 11,
+      "win": 18.2,
+      "pf": 0.26,
+      "net_pct": -7.33,
+      "avg_r": -0.62,
+      "mdd": 7.81,
+      "targets": 0,
+      "stops": 8,
+      "times": 3,
+      "boot": {
+       "mean": -0.62,
+       "lo": -1.093,
+       "hi": 0.1,
+       "p_positive": 0.04
+      }
+     }
+    },
+    {
+     "threshold": 60,
+     "kept": 45,
+     "rejected": 15,
+     "all": {
+      "trades": 43,
+      "win": 39.5,
+      "pf": 1.22,
+      "net_pct": 6.16,
+      "avg_r": 0.15,
+      "mdd": 8.67,
+      "targets": 4,
+      "stops": 22,
+      "times": 17,
+      "boot": {
+       "mean": 0.153,
+       "lo": -0.331,
+       "hi": 0.687,
+       "p_positive": 0.695
+      }
+     },
+     "is": {
+      "trades": 24,
+      "win": 41.7,
+      "pf": 1.63,
+      "net_pct": 8.84,
+      "avg_r": 0.37,
+      "mdd": 6.57,
+      "targets": 4,
+      "stops": 11,
+      "times": 9,
+      "boot": {
+       "mean": 0.37,
+       "lo": -0.359,
+       "hi": 1.155,
+       "p_positive": 0.832
+      }
+     },
+     "os": {
+      "trades": 19,
+      "win": 36.8,
+      "pf": 0.81,
+      "net_pct": -2.67,
+      "avg_r": -0.12,
+      "mdd": 8.67,
+      "targets": 0,
+      "stops": 11,
+      "times": 8,
+      "boot": {
+       "mean": -0.122,
+       "lo": -0.681,
+       "hi": 0.49,
+       "p_positive": 0.355
+      }
+     }
+    },
+    {
+     "threshold": 65,
+     "kept": 49,
+     "rejected": 11,
+     "all": {
+      "trades": 47,
+      "win": 40.4,
+      "pf": 1.18,
+      "net_pct": 5.62,
+      "avg_r": 0.13,
+      "mdd": 10.72,
+      "targets": 4,
+      "stops": 24,
+      "times": 19,
+      "boot": {
+       "mean": 0.129,
+       "lo": -0.29,
+       "hi": 0.619,
+       "p_positive": 0.716
+      }
+     },
+     "is": {
+      "trades": 25,
+      "win": 44.0,
+      "pf": 1.74,
+      "net_pct": 10.49,
+      "avg_r": 0.42,
+      "mdd": 5.16,
+      "targets": 4,
+      "stops": 11,
+      "times": 10,
+      "boot": {
+       "mean": 0.416,
+       "lo": -0.272,
+       "hi": 1.163,
+       "p_positive": 0.87
+      }
+     },
+     "os": {
+      "trades": 22,
+      "win": 36.4,
+      "pf": 0.71,
+      "net_pct": -4.87,
+      "avg_r": -0.2,
+      "mdd": 10.72,
+      "targets": 0,
+      "stops": 13,
+      "times": 9,
+      "boot": {
+       "mean": -0.197,
+       "lo": -0.702,
+       "hi": 0.344,
+       "p_positive": 0.22
+      }
+     }
+    },
+    {
+     "threshold": 70,
+     "kept": 58,
+     "rejected": 2,
+     "all": {
+      "trades": 55,
+      "win": 38.2,
+      "pf": 1.03,
+      "net_pct": 1.0,
+      "avg_r": 0.03,
+      "mdd": 11.7,
+      "targets": 4,
+      "stops": 29,
+      "times": 22,
+      "boot": {
+       "mean": 0.03,
+       "lo": -0.359,
+       "hi": 0.478,
+       "p_positive": 0.571
+      }
+     },
+     "is": {
+      "trades": 29,
+      "win": 44.8,
+      "pf": 1.68,
+      "net_pct": 10.41,
+      "avg_r": 0.36,
+      "mdd": 6.21,
+      "targets": 4,
+      "stops": 12,
+      "times": 13,
+      "boot": {
+       "mean": 0.357,
+       "lo": -0.249,
+       "hi": 1.017,
+       "p_positive": 0.861
+      }
+     },
+     "os": {
+      "trades": 26,
+      "win": 30.8,
+      "pf": 0.55,
+      "net_pct": -9.41,
+      "avg_r": -0.33,
+      "mdd": 11.7,
+      "targets": 0,
+      "stops": 17,
+      "times": 9,
+      "boot": {
+       "mean": -0.335,
+       "lo": -0.782,
+       "hi": 0.156,
+       "p_positive": 0.082
+      }
+     }
+    },
+    {
+     "threshold": 80,
+     "kept": 60,
+     "rejected": 0,
+     "all": {
+      "trades": 57,
+      "win": 38.6,
+      "pf": 1.07,
+      "net_pct": 2.58,
+      "avg_r": 0.06,
+      "mdd": 10.26,
+      "targets": 4,
+      "stops": 30,
+      "times": 23,
+      "boot": {
+       "mean": 0.057,
+       "lo": -0.332,
+       "hi": 0.461,
+       "p_positive": 0.603
+      }
+     },
+     "is": {
+      "trades": 29,
+      "win": 44.8,
+      "pf": 1.68,
+      "net_pct": 10.41,
+      "avg_r": 0.36,
+      "mdd": 6.21,
+      "targets": 4,
+      "stops": 12,
+      "times": 13,
+      "boot": {
+       "mean": 0.357,
+       "lo": -0.249,
+       "hi": 1.017,
+       "p_positive": 0.861
+      }
+     },
+     "os": {
+      "trades": 28,
+      "win": 32.1,
+      "pf": 0.65,
+      "net_pct": -7.83,
+      "avg_r": -0.25,
+      "mdd": 10.26,
+      "targets": 0,
+      "stops": 18,
+      "times": 10,
+      "boot": {
+       "mean": -0.254,
+       "lo": -0.716,
+       "hi": 0.251,
+       "p_positive": 0.155
+      }
+     }
+    }
+   ],
+   "meta": {
+    "model": "gemini-3.5-flash-lite",
+    "threshold": 60.0,
+    "calls": 7,
+    "cache_hits": 173,
+    "errors": 0,
+    "budget_hits": 0,
+    "avg_latency_s": 1.55,
+    "wall_s": 3.6
+   }
+  }
+ },
+ "verdict": {
+  "improved_markets": 1,
+  "not_improved_markets": 2,
+  "markets": [
+   {
+    "market": "btc15",
+    "avg_r_delta": 0.0,
+    "pf_delta": 0.01,
+    "net_pct_delta": 1.78,
+    "reject_pct": 36.7,
+    "four_r_kept": "4/6",
+    "worst_decile_rejected_pct": 20.0
+   },
+   {
+    "market": "btc60",
+    "avg_r_delta": -0.11,
+    "pf_delta": -0.16,
+    "net_pct_delta": -2.62,
+    "reject_pct": 23.3,
+    "four_r_kept": "1/3",
+    "worst_decile_rejected_pct": 0.0
+   },
+   {
+    "market": "eth30",
+    "avg_r_delta": 0.09,
+    "pf_delta": 0.15,
+    "net_pct_delta": 3.58,
+    "reject_pct": 25.0,
+    "four_r_kept": "4/4",
+    "worst_decile_rejected_pct": 40.0
+   }
+  ]
+ },
+ "table": [
+  "| BTCUSDT 15분봉 | 60 | 36.7% | 57 → 36 | 35.1 → 36.1 | 0.9 → 0.91 | -4.37% → -2.59% | -0.080 → -0.080 | 14.3% → 15.8% |",
+  "| BTCUSDT 1시간봉 | 60 | 23.3% | 59 → 45 | 35.6 → 33.3 | 0.78 → 0.62 | -7.93% → -10.55% | -0.130 → -0.240 | 13.6% → 11.3% |",
+  "| ETHUSDT 30분봉 | 60 | 25.0% | 57 → 43 | 38.6 → 39.5 | 1.07 → 1.22 | +2.58% → +6.16% | +0.060 → +0.150 | 10.3% → 8.7% |"
+ ]
+}
