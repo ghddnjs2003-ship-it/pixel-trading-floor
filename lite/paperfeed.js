@@ -43,6 +43,12 @@
     }
   }
 
+  // '2026-11-20 07:00' → '11-20 07:00' (연도는 표에서 뺀다)
+  function shortTime(text) {
+    const s = String(text == null ? '' : text);
+    return s.replace(/^\d{4}-(\d{2}-\d{2}\s+\d{2}:\d{2}).*$/, '$1');
+  }
+
   function actionChip(action) {
     const key = String(action || '').toUpperCase();
     return `<span class="pm-ai-chip ${ACTION_CLS[key] || 'hold'}">${esc(ACTION_KO[key] || key || '—')}</span>`;
@@ -136,7 +142,8 @@
         isNum(stats.net_pnl) && stats.net_pnl > 0 ? 'up' : isNum(stats.net_pnl) && stats.net_pnl < 0 ? 'down' : ''),
       card('킬스위치', '일 손실 3% · 연속 3패',
         killOk ? '<span class="pm-ai-ok">정상</span>' : '<span class="pm-ai-warn">발동</span>',
-        esc(killOk ? (kill.reason || '정상 — 진입 가능')
+        esc(killOk
+          ? `오늘 ${num(kill.trades_today)}건 · 실현 ${num(kill.realized_pnl, 2)} USDT · 진입 가능`
           : `${kill.reason || '진입 차단'}${kill.tripped_until ? ` · ${kst(kill.tripped_until)}까지` : ''}`),
         'pm-ai-val-inline'),
     ];
@@ -167,9 +174,9 @@
       let note = events.join(' · ');
       if (!note && filter.reason) note = String(filter.reason);
       if (!note && rec.signal) note = `${rec.signal.kind || ''} ${rec.signal.label || ''}`.trim();
-      if (!note) note = rec.source ? `${String(rec.source).toUpperCase()} 캔들` : '';
+      if (!note) note = String(rec.action || '').toUpperCase() === 'HOLD' ? 'M1 신호 없음 — 진입 조건 미충족' : (rec.source ? `${String(rec.source).toUpperCase()} 캔들` : '');
       return '<tr>'
-        + `<td>${esc(rec.bar_kst || kst(rec.bar || rec.ts))}</td>`
+        + `<td>${esc(shortTime(rec.bar_kst || kst(rec.bar || rec.ts)))}</td>`
         + `<td>${num(rec.price, 1)}</td>`
         + `<td>${actionChip(rec.action)}</td>`
         + `<td>${ai}</td>`
@@ -184,7 +191,7 @@
     const rule = d.rule || {};
     const ruleLine = [
       `${esc(d.symbol || 'BTCUSDT')} ${num(d.interval)}분봉`,
-      rule.name ? `후보 ${esc(rule.name)}` : '',
+      rule.name ? esc(rule.name) : '',
       Array.isArray(rule.kinds) && rule.kinds.length ? esc(rule.kinds.join('·')) : '',
       rule.session === 'asia' ? '아시아 세션 진입' : '',
       isNum(rule.stop_atr) ? `${num(rule.stop_atr, 1)} ATR 손절` : '',

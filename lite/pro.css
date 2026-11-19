@@ -320,8 +320,12 @@
 .pm-ai-pos-tag { padding: 1px 6px; color: #9fd6c4; background: #14332c; border: 1px solid #235246; border-radius: 3px; font-size: 9px; }
 .pm-ai-pos-note { margin-left: auto; color: #8fa0b4; }
 .pm-ai-log { overflow-x: auto; }
-.pm-ai-table th:nth-child(4), .pm-ai-table td:nth-child(4) { text-align: center; }
-.pm-ai-table td.pm-ai-note { text-align: left; color: #93a3b6; white-space: normal; min-width: 170px; }
+.pm-ai-table th:nth-child(1), .pm-ai-table td:nth-child(1) { width: 18%; }
+.pm-ai-table th:nth-child(2), .pm-ai-table td:nth-child(2) { width: 14%; }
+.pm-ai-table th:nth-child(3), .pm-ai-table td:nth-child(3) { width: 11%; text-align: center; }
+.pm-ai-table th:nth-child(4), .pm-ai-table td:nth-child(4) { width: 11%; text-align: center; }
+.pm-ai-table td.pm-ai-note { width: 46%; text-align: left; color: #93a3b6; white-space: normal; }
+.pm-ai-table th:nth-child(5) { text-align: left; }
 .pm-ai-ai { padding: 1px 5px; color: #8b98ab; border: 1px solid #2b3646; border-radius: 2px; font-size: 9px; }
 .pm-ai-ai.pass { color: #6fe0b4; background: #12291f; border-color: #26604c; }
 .pm-ai-ai.reject { color: #f09aa6; background: #2a161a; border-color: #5a2d35; }
