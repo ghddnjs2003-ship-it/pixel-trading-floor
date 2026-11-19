@@ -10,6 +10,12 @@
 청산 방식 (cfg.exit_mode)
 - bracket   : 목표가 한 번에 전량 청산(기본). 손절·목표를 같은 봉에서 둘 다 닿으면 손절 우선.
 - half_trail: 1R에서 절반 익절 + 손절을 본전으로, 남은 절반은 ATR 추적 손절/최종 목표.
+- trail     : 목표 없이 ATR 추적 손절로 추세를 끝까지 따라간다(초기 손절만 고정).
+- be_trail  : +be_trigger_r R에서 손절을 본전으로 옮기고, 그 뒤 ATR 추적.
+
+진입 필터
+- session_filter: UTC 시간대로 진입 시간을 제한한다(asia/london/ny/london_ny/ny_open/outside_ln).
+- max_bars: 진입 후 N봉이 지나면 종가 청산(시간 손절). 0 = 제한 없음.
 
 데이터
 - 공개 API(바이비트·OKX·비트겟·바이낸스) 또는 저장한 CSV/JSON을 읽는다. API 키는 필요 없다.
@@ -212,7 +218,11 @@ class BacktestConfig:
     max_bars: int = 0                # 0 = 제한 없음
     target_mode: str = "signal"      # signal(신호 목표) | r(고정 R)
     target_r: float = 1.5
+    target_cap_r: float = 0.0        # >0이면 구조 목표가 이 R보다 멀 때 이 R로 자른다
     min_rr: float = 0.0              # 0 = 신호 목표를 그대로. >0이면 이보다 가까운 신호는 건너뛴다
+    be_trigger_r: float = 1.0        # be_trail: 손절을 본전으로 옮기는 R
+    session_filter: str = "off"      # off | asia | london | ny | london_ny | ny_open | outside_ln
+    sessions: tuple = ()             # 직접 지정: ((시작UTC시, 끝UTC시), ...) — 있으면 session_filter보다 우선
 
     def to_dict(self) -> Dict:
         return asdict(self)
@@ -222,30 +232,64 @@ def _bps(x: float) -> float:
     return x / 10_000.0
 
 
+# UTC 시간대 — BTC 유동성이 실리는 구간(시간 단위). 세션 이름을 바꾸면 여기만 고치면 된다.
+SESSION_HOURS = {
+    "off": (),
+    "asia": ((0, 8),),
+    "london": ((7, 16),),
+    "ny": ((12, 21),),
+    "ny_open": ((13, 18),),
+    "london_ny": ((7, 21),),
+    "outside_ln": ((0, 7), (21, 24)),
+}
+
+
+def session_hours(cfg: BacktestConfig) -> tuple:
+    if cfg.sessions:
+        return tuple(cfg.sessions)
+    return SESSION_HOURS.get(cfg.session_filter, ())
+
+
+def in_session(ts_ms: int, hours) -> bool:
+    """봉 시각(ms)의 UTC 시가 시간대 안인지. 시간대를 주지 않았으면 항상 True."""
+    if not hours:
+        return True
+    h = (int(ts_ms) // 3_600_000) % 24
+    return any(a <= h < b for a, b in hours)
+
+
 def _target_price(side: str, entry: float, risk: float, sig: Dict, cfg: BacktestConfig) -> float:
     if cfg.target_mode == "r":
         return entry + risk * cfg.target_r if side == "LONG" else entry - risk * cfg.target_r
-    return sig["target"]
+    target = sig["target"]
+    if cfg.target_cap_r > 0:
+        cap = entry + risk * cfg.target_cap_r if side == "LONG" else entry - risk * cfg.target_cap_r
+        target = min(target, cap) if side == "LONG" else max(target, cap)
+    return target
 
 
 def simulate(candles: Sequence[Dict], signals: Sequence[Dict], cfg: BacktestConfig,
              params: Optional[Params] = None) -> Dict:
     """신호 목록을 봉 위에서 체결시킨다. 다음 봉 시가 진입, 청산은 cfg.exit_mode에 따라."""
     p = params or Params()
-    atr = atr_series(candles, p.atr_period) if cfg.exit_mode == "half_trail" else None
+    need_atr = cfg.exit_mode in ("half_trail", "trail", "be_trail")
+    atr = atr_series(candles, p.atr_period) if need_atr else None
     by_index = {s["index"]: s for s in signals}
     equity = cfg.initial_equity
     trades: List[Dict] = []
     open_trade: Optional[Dict] = None
-    skipped = {"신호없음": 0, "포지션중": 0, "종류제외": 0, "리스크초과": 0, "손익비미달": 0}
+    skipped = {"신호없음": 0, "포지션중": 0, "종류제외": 0, "리스크초과": 0, "손익비미달": 0,
+               "세션제외": 0}
     slip = _bps(cfg.slippage_bps)
     fee = _bps(cfg.fee_bps)
+    hours = session_hours(cfg)
 
     def close_part(trade: Dict, price: float, frac: float, reason: str) -> float:
         qty = trade["qty"] * frac
         fill = price * (1 - slip) if trade["side"] == "LONG" else price * (1 + slip)
         gross = (fill - trade["entry"]) * qty if trade["side"] == "LONG" else (trade["entry"] - fill) * qty
         fees = (trade["entry"] + fill) * qty * fee
+        trade["cost"] = trade.get("cost", 0.0) + fees + price * qty * slip
         return gross - fees
 
     for i in range(len(candles)):
@@ -255,12 +299,13 @@ def simulate(candles: Sequence[Dict], signals: Sequence[Dict], cfg: BacktestConf
             t = open_trade
             side = t["side"]
             hit_stop = (bar["l"] <= t["stop"]) if side == "LONG" else (bar["h"] >= t["stop"])
-            hit_target = (bar["h"] >= t["target"]) if side == "LONG" else (bar["l"] <= t["target"])
+            hit_target = t["target"] is not None and (
+                (bar["h"] >= t["target"]) if side == "LONG" else (bar["l"] <= t["target"]))
             pnl = 0.0
             reason = None
             exit_price = None
             parts: List[Dict] = []
-            time_up = cfg.max_bars and (i - t["entry_bar"]) >= cfg.max_bars
+            time_up = bool(cfg.max_bars) and (i - t["entry_bar"]) >= cfg.max_bars
 
             if cfg.exit_mode == "half_trail" and not t["half_done"]:
                 first = t["first_target"]
@@ -301,6 +346,38 @@ def simulate(candles: Sequence[Dict], signals: Sequence[Dict], cfg: BacktestConf
                     pnl = close_part(t, t["target"], 0.5, "TARGET")
                     parts.append({"price": t["target"], "frac": 0.5, "reason": "TARGET"})
                     reason, exit_price = "TARGET", t["target"]
+            elif cfg.exit_mode in ("trail", "be_trail"):
+                # 목표 없이 추세를 따라간다 — 초기 손절 → (본전) → ATR 추적
+                a = atr[i] if atr and atr[i] else t["atr"]
+                if hit_stop:
+                    reason = "TRAIL" if t["trailed"] else "STOP"
+                    pnl = close_part(t, t["stop"], 1.0, reason)
+                    exit_price = t["stop"]
+                else:
+                    if cfg.exit_mode == "be_trail" and not t["be_done"]:
+                        trig = (t["entry"] + cfg.be_trigger_r * t["risk"] if side == "LONG"
+                                else t["entry"] - cfg.be_trigger_r * t["risk"])
+                        reached = (bar["h"] >= trig) if side == "LONG" else (bar["l"] <= trig)
+                        if reached:
+                            t["stop"] = t["entry"]
+                            t["be_done"] = True
+                            t["trailed"] = True
+                    if side == "LONG":
+                        t["peak"] = max(t["peak"], bar["h"])
+                        t["stop"] = max(t["stop"], t["peak"] - cfg.trail_atr * a)
+                        if t["stop"] > t["initial_stop"]:
+                            t["trailed"] = True
+                    else:
+                        t["peak"] = min(t["peak"], bar["l"])
+                        t["stop"] = min(t["stop"], t["peak"] + cfg.trail_atr * a)
+                        if t["stop"] < t["initial_stop"]:
+                            t["trailed"] = True
+                    if hit_stop:
+                        pnl = close_part(t, t["stop"], 1.0, "TRAIL")
+                        reason, exit_price = "TRAIL", t["stop"]
+                    elif time_up:
+                        pnl = close_part(t, bar["c"], 1.0, "TIME")
+                        reason, exit_price = "TIME", bar["c"]
             else:
                 if hit_stop:
                     pnl = close_part(t, t["stop"], 1.0, "STOP")
@@ -320,12 +397,15 @@ def simulate(candles: Sequence[Dict], signals: Sequence[Dict], cfg: BacktestConf
             if exit_price is not None:
                 equity += pnl
                 trades.append({
-                    **{k: t[k] for k in ("side", "kind", "grade", "entry", "stop", "target", "qty", "risk_usd")},
+                    **{k: t[k] for k in ("side", "kind", "grade", "entry", "initial_stop", "qty", "risk_usd")},
+                    "stop": round(t["initial_stop"], 2),
+                    "target": round(t["target"], 2) if t["target"] is not None else None,
                     "entry_time": t["entry_time"], "exit_time": bar["t"], "exit": exit_price,
                     "reason": reason, "pnl": round(pnl, 2),
                     "r": round(pnl / t["risk_usd"], 3) if t["risk_usd"] else 0.0,
                     "equity": round(equity, 2), "bars": i - t["entry_bar"],
                     "parts": parts, "signal_time": t["signal_time"],
+                    "cost": round(t.get("cost", 0.0), 2),
                     "reasons": t.get("reasons", []),
                 })
                 open_trade = None
@@ -346,9 +426,15 @@ def simulate(candles: Sequence[Dict], signals: Sequence[Dict], cfg: BacktestConf
             continue
 
         entry_bar = candles[i + 1]
+        if not in_session(entry_bar["t"], hours):     # 세션·시간대 필터
+            skipped["세션제외"] += 1
+            continue
         side = sig["side"]
         entry = entry_bar["o"] * (1 + slip) if side == "LONG" else entry_bar["o"] * (1 - slip)
         stop = sig["stop"]
+        if sig.get("stop_atr"):                       # ATR 고정 손절 — 실제 진입가 기준으로 다시 잡는다
+            dist = sig["stop_atr"] * sig["atr"]
+            stop = entry - dist if side == "LONG" else entry + dist
         # 시가가 이미 손절/목표를 지나 있으면 체결하지 않는다(갭에서 규칙이 무의미해짐)
         if side == "LONG" and entry <= stop:
             skipped["리스크초과"] += 1
@@ -360,15 +446,18 @@ def simulate(candles: Sequence[Dict], signals: Sequence[Dict], cfg: BacktestConf
         if risk_per_unit <= 0:
             continue
         target = _target_price(side, entry, risk_per_unit, sig, cfg)
-        if cfg.min_rr and abs(target - entry) / risk_per_unit < cfg.min_rr - 1e-9:
+        if cfg.exit_mode in ("trail", "be_trail"):
+            target = None                             # 추적 청산에는 목표가를 쓰지 않는다
+        elif cfg.min_rr and abs(target - entry) / risk_per_unit < cfg.min_rr - 1e-9:
             skipped["손익비미달"] += 1
             continue
-        if side == "LONG" and entry >= target:
-            skipped["리스크초과"] += 1
-            continue
-        if side == "SHORT" and entry <= target:
-            skipped["리스크초과"] += 1
-            continue
+        if target is not None:
+            if side == "LONG" and entry >= target:
+                skipped["리스크초과"] += 1
+                continue
+            if side == "SHORT" and entry <= target:
+                skipped["리스크초과"] += 1
+                continue
         risk_usd = equity * cfg.risk_pct / 100
         qty = risk_usd / risk_per_unit
         notional = qty * entry
@@ -378,9 +467,10 @@ def simulate(candles: Sequence[Dict], signals: Sequence[Dict], cfg: BacktestConf
         open_trade = {
             "side": side, "kind": sig["kind"], "grade": sig.get("grade"),
             "entry": entry, "stop": stop, "target": target, "qty": qty, "risk_usd": risk_usd,
+            "initial_stop": stop, "risk": risk_per_unit,
             "entry_time": entry_bar["t"], "entry_bar": i + 1, "signal_bar": i,
-            "signal_time": sig.get("time"), "atr": sig.get("atr"),
-            "half_done": False, "peak": entry,
+            "signal_time": sig.get("time"), "atr": sig.get("atr"), "cost": 0.0,
+            "half_done": False, "peak": entry, "be_done": False, "trailed": False,
             "first_target": entry + risk_per_unit * cfg.half_exit_r if side == "LONG"
             else entry - risk_per_unit * cfg.half_exit_r,
             "reasons": sig.get("reasons", []),
@@ -411,7 +501,35 @@ def summarize(trades: Sequence[Dict], cfg: BacktestConfig, equity: float) -> Dic
     for t in trades:
         streak = streak + 1 if t["pnl"] < 0 else 0
         worst = max(worst, streak)
+
+    def _bucket(key) -> Dict:
+        out = {}
+        for t in trades:
+            k = key(t)
+            b = out.setdefault(k, {"trades": 0, "wins": 0, "pnl": 0.0})
+            b["trades"] += 1
+            b["wins"] += 1 if t["pnl"] > 0 else 0
+            b["pnl"] += t["pnl"]
+        return out
+
+    by_side = {}
+    for side in ("LONG", "SHORT"):
+        s = _bucket(lambda t, sd=side: t.get("side")).get(side)
+        by_side[side] = {
+            "trades": s["trades"] if s else 0,
+            "win_rate_pct": round(s["wins"] / s["trades"] * 100, 1) if s and s["trades"] else None,
+            "net_pnl": round(s["pnl"], 2) if s else 0.0,
+        }
+    months = _bucket(lambda t: datetime.fromtimestamp(t["entry_time"] / 1000, tz=timezone.utc)
+                     .strftime("%Y-%m") if t.get("entry_time") else "-")
+    monthly = [{"month": m, "trades": b["trades"],
+                "win_rate_pct": round(b["wins"] / b["trades"] * 100, 1),
+                "net_pnl": round(b["pnl"], 2)} for m, b in sorted(months.items()) if m != "-"]
+    cost_r = [(t.get("cost") or 0.0) / t["risk_usd"] for t in trades if t.get("risk_usd")]
     return {
+        "by_side": by_side,
+        "monthly": monthly,
+        "avg_cost_r": round(sum(cost_r) / len(cost_r), 3) if cost_r else None,
         "trades": n,
         "win_rate_pct": round(len(wins) / n * 100, 1) if n else None,
         "avg_r": round(sum(r_values) / n, 2) if n else None,
@@ -508,11 +626,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--bos", default=False, action="store_true", help="회복 봉의 구조 돌파(BOS) 요구(파인에는 없음)")
     ap.add_argument("--stop-buf", type=float, default=0.15, help="더블 S 손절 버퍼(ATR)")
     ap.add_argument("--m1-stop-buf", type=float, default=0.0, help="M1 손절 버퍼(ATR, 0 = 존 경계)")
+    ap.add_argument("--stop-mode", default="structure", choices=["structure", "atr"],
+                    help="structure(스빕 극점·존 반대편) | atr(진입가 ∓ 배수 × ATR)")
+    ap.add_argument("--stop-atr", type=float, default=1.0, help="--stop-mode atr일 때 손절 폭(ATR)")
+    ap.add_argument("--ds-target", default="liq", choices=["liq", "zone", "r"], help="더블 S 목표 기준")
+    ap.add_argument("--m1-target", default="zone", choices=["zone", "liq", "r"], help="M1 목표 기준")
+    ap.add_argument("--ds-labels", default="거부,복귀", help="더블 S 라벨 선택(예: 거부)")
+    ap.add_argument("--min-rvol", type=float, default=0.0, help="더블 S 신호 봉 상대거래량 하한")
     ap.add_argument("--htf", default="off", choices=["off", "ema50", "ema200"], help="상위 4H 추세 필터")
-    ap.add_argument("--target", default="signal", help="signal | r:1.5 | r:2.0 | r:2.5")
-    ap.add_argument("--exit-mode", default="bracket", choices=["bracket", "half_trail"])
+    ap.add_argument("--target", default="signal", help="signal | r:1.5 | r:2.0 | r:3.0")
+    ap.add_argument("--target-cap-r", type=float, default=0.0, help="구조 목표를 이 R로 자름(0 = 안 자름)")
+    ap.add_argument("--exit-mode", default="bracket", choices=["bracket", "half_trail", "trail", "be_trail"])
     ap.add_argument("--trail-atr", type=float, default=1.5)
+    ap.add_argument("--be-trigger-r", type=float, default=1.0, help="be_trail: 본전 이동 R")
     ap.add_argument("--max-bars", type=int, default=0)
+    ap.add_argument("--session", default="off",
+                    choices=["off", "asia", "london", "ny", "ny_open", "london_ny", "outside_ln"])
     ap.add_argument("--allow", default="DS,M1", help="체결할 신호 종류(예: DS,M1 / DS)")
     ap.add_argument("--json-out", default=None, help="결과 JSON 저장 경로")
     args = ap.parse_args(argv)
@@ -521,11 +650,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     params = Params(min_rr=args.min_rr, cci_mode=args.cci_mode, volume_mult=args.volume_mult,
                     bb_expand=args.bb_expand, sweep_max_atr=args.sweep_max, require_bos=args.bos,
                     stop_buffer_atr=args.stop_buf, m1_stop_buffer_atr=args.m1_stop_buf,
+                    stop_mode=args.stop_mode, stop_atr=args.stop_atr,
+                    ds_target=args.ds_target, m1_target=args.m1_target,
+                    ds_labels=tuple(s.strip() for s in args.ds_labels.split(",") if s.strip()),
+                    min_rvol=args.min_rvol,
                     use_htf_trend=args.htf != "off", htf_ema_len=htf_len)
     cfg = BacktestConfig(initial_equity=args.equity, risk_pct=args.risk_pct,
                          fee_bps=args.fee_bps, slippage_bps=args.slippage_bps,
                          allow_kinds=tuple(k.strip().upper() for k in args.allow.split(",") if k.strip()),
                          exit_mode=args.exit_mode, trail_atr=args.trail_atr, max_bars=args.max_bars,
+                         be_trigger_r=args.be_trigger_r, target_cap_r=args.target_cap_r,
+                         session_filter=args.session,
                          min_rr=args.tm, **_parse_target(args.target))
     if args.json_in:
         candles = json.load(open(args.json_in, encoding="utf-8"))

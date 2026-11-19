@@ -93,12 +93,21 @@ class Params:
     use_m1: bool = True
 
     # 손절·목표 (파인 밖 — CES 룰·백테스트용). M1 손절은 파인의 존 경계를 쓴다.
+    stop_mode: str = "structure"        # structure(스윕 극점·존 반대편) | atr(진입가 ∓ 배수 × ATR)
+    stop_atr: float = 1.0               # stop_mode == "atr"일 때 두 신호 공통 손절 폭(ATR 배수)
     stop_buffer_atr: float = 0.15       # 더블 S 손절: 스윕 극점에서 0.15 ATR 바깥
-    ds_stop_atr: float = 0.0            # >0이면 더블 S 손절을 '진입가 ∓ 이 배수 × ATR'로 둔다(변동성 고정)
     m1_stop_buffer_atr: float = 0.0     # M1 손절: 존 반대편 경계에서 이만큼 더 바깥(0 = 파인 그대로)
-    min_rr: float = 1.5                 # 목표는 반대편 유동성, 없으면 이 배수 R
+    min_rr: float = 1.5                 # 목표는 반대편 유동성·존, 없으면 이 배수 R
     target_r: float = 1.5
+    ds_target: str = "liq"              # liq(반대편 유동성) | zone(반대편 1H 매물대) | r(고정 배수)
+    m1_target: str = "zone"             # zone(반대편 1H 매물대) | liq(반대편 유동성) | r(고정 배수)
     require_bos: bool = False           # 백테스트 비교용 옵션(v7 파인에는 없음)
+
+    # 신호 선별 — 라벨·변동성·거래량
+    ds_labels: Tuple[str, ...] = ("거부", "복귀")   # 더블 S 라벨 중 쓸 것
+    min_rvol: float = 0.0               # 더블 S 신호 봉의 상대 거래량 하한(0 = 제한 없음)
+    min_atr_pct: float = 0.0            # ATR/가격 × 100 하한(죽은 장 회피). 0 = 제한 없음
+    max_atr_pct: float = 100.0          # ATR/가격 × 100 상한(폭발 장 회피)
 
     def to_dict(self) -> Dict:
         return asdict(self)
@@ -472,12 +481,14 @@ class Engine:
             ds_dn_ok = (not p.ds_htf_filter) or (ema4_val is not None and c["c"] < ema4_val)
             if short_rej or short_rec:
                 sig = self._ds_signal(candles, i, "SHORT", "거부" if short_rej else "복귀",
-                                      c["h"], a, hit_level, bsl, ssl, "BSL", htf_ok=ds_dn_ok)
+                                      c["h"], a, hit_level, bsl, ssl, "BSL", htf_ok=ds_dn_ok,
+                                      res=res, sup=sup)
                 if sig:
                     signals.append(sig)
             if long_rej or long_rec:
                 sig = self._ds_signal(candles, i, "LONG", "거부" if long_rej else "복귀",
-                                      c["l"], a, hit_level, bsl, ssl, "SSL", htf_ok=ds_up_ok)
+                                      c["l"], a, hit_level, bsl, ssl, "SSL", htf_ok=ds_up_ok,
+                                      res=res, sup=sup)
                 if sig:
                     signals.append(sig)
 
@@ -614,7 +625,7 @@ class Engine:
 
             if (sig_long or sig_long_m12) and cool and consec_long < p.max_consec_signals:
                 sig = self._m1_signal(candles, i, "LONG", sig_long, up, res, sup, a,
-                                      sig_long_m12, up["lvl"])
+                                      sig_long_m12, up["lvl"], bsl, ssl)
                 if sig:
                     signals.append(sig)
                     last_m1_bar = i
@@ -622,7 +633,7 @@ class Engine:
                     consec_short = 0
             if (sig_short or sig_short_m12) and cool and consec_short < p.max_consec_signals:
                 sig = self._m1_signal(candles, i, "SHORT", sig_short, dn, res, sup, a,
-                                      sig_short_m12, dn["lvl"])
+                                      sig_short_m12, dn["lvl"], bsl, ssl)
                 if sig:
                     signals.append(sig)
                     last_m1_bar = i
@@ -636,87 +647,120 @@ class Engine:
     # -- 신호 만들기 --------------------------------------------------------
     def _ds_signal(self, candles, i: int, side: str, label: str, extreme: float, atr: float,
                    level: Optional[Level], bsl: List[Level], ssl: List[Level], level_name: str,
-                   htf_ok: bool = True) -> Optional[Dict]:
+                   htf_ok: bool = True, res: Optional[List[Zone]] = None,
+                   sup: Optional[List[Zone]] = None) -> Optional[Dict]:
         p = self.p
         c = candles[i]
         entry = c["c"]
-        if side not in p.allow_sides:
+        if side not in p.allow_sides or label not in p.ds_labels:
             return None
         if not htf_ok:
             return None
+        if not _vol_band_ok(p, entry, atr):
+            return None
+        rvol = _rvol(candles, i, p.vol_len)
+        if p.min_rvol > 0 and (rvol is None or rvol < p.min_rvol):
+            return None
         if side == "LONG":
-            stop = (entry - p.ds_stop_atr * atr) if p.ds_stop_atr > 0 else (extreme - p.stop_buffer_atr * atr)
             if p.require_bos and i >= 1 and not c["c"] > candles[i - 1]["h"]:
                 return None
             liq = sorted([l.price for l in bsl if not l.consumed and l.price > entry])
+            zone = sorted([z.bot for z in (res or []) if z.bot > entry])
         else:
-            stop = (entry + p.ds_stop_atr * atr) if p.ds_stop_atr > 0 else (extreme + p.stop_buffer_atr * atr)
             if p.require_bos and i >= 1 and not c["c"] < candles[i - 1]["l"]:
                 return None
             liq = sorted([l.price for l in ssl if not l.consumed and l.price < entry], reverse=True)
+            zone = sorted([z.top for z in (sup or []) if z.top < entry], reverse=True)
+        if p.stop_mode == "atr":
+            stop = entry - p.stop_atr * atr if side == "LONG" else entry + p.stop_atr * atr
+            stop_atr = p.stop_atr
+        else:
+            stop = extreme - p.stop_buffer_atr * atr if side == "LONG" else extreme + p.stop_buffer_atr * atr
+            stop_atr = None
         risk = abs(entry - stop)
         if risk <= 0:
             return None
-        target = None
-        for t in liq:
-            if side == "LONG" and (t - entry) / risk >= p.min_rr:
-                target = t
-                break
-            if side == "SHORT" and (entry - t) / risk >= p.min_rr:
-                target = t
-                break
-        fallback = target is None
-        if fallback:
-            target = entry + risk * p.target_r if side == "LONG" else entry - risk * p.target_r
+        cands = {"liq": liq, "zone": zone, "r": []}[p.ds_target]
+        target, fallback = _first_target(side, entry, risk, cands, p.min_rr, p.target_r)
         reasons = []
         if level is not None:
             reasons.append(f"{level_name} {level.price:,.1f} 스윕 후 {'복귀' if label == '복귀' else '거부'}")
-        reasons.append(f"손절 {stop:,.1f} · 목표 {'1.5R 대체' if fallback else f'{target:,.1f}'}")
-        rvol = _rvol(candles, i, p.vol_len)
+        why = "1.5R 대체" if fallback else f"{target:,.1f}"
+        if not fallback and p.ds_target != "liq":
+            why += "(존)" if p.ds_target == "zone" else ""
+        reasons.append(f"손절 {stop:,.1f} · 목표 {why}")
         return {
             "side": side, "kind": "DS", "label": label, "index": i, "time": c["t"],
             "entry": entry, "stop": stop, "target": target, "rr": round(abs(target - entry) / risk, 2),
-            "risk": risk, "atr": atr, "rvol": None if rvol is None else round(rvol, 2),
+            "risk": risk, "atr": atr, "stop_atr": stop_atr,
+            "rvol": None if rvol is None else round(rvol, 2),
             "grade": "A" if (rvol is not None and rvol >= 1.5) else "B",
             "level": None if level is None else level.price,
             "zone": None, "reasons": reasons,
         }
 
     def _m1_signal(self, candles, i: int, side: str, primary: bool, state: Dict,
-                   res: List[Zone], sup: List[Zone], atr: float, m12: bool, lvl: float) -> Optional[Dict]:
+                   res: List[Zone], sup: List[Zone], atr: float, m12: bool, lvl: float,
+                   bsl: Optional[List[Level]] = None,
+                   ssl: Optional[List[Level]] = None) -> Optional[Dict]:
         p = self.p
         c = candles[i]
         entry = c["c"]
+        if side not in p.allow_sides:      # 방향 제한은 두 신호 종류 모두에 걸린다(더블 S만 걸리던 버그 수정)
+            return None
+        if not _vol_band_ok(p, entry, atr):
+            return None
         buf = p.m1_stop_buffer_atr * atr
-        stop = state["bot"] - buf if side == "LONG" else state["bot"] + buf
-        if side == "LONG":
-            cands = sorted([z.bot for z in res if z.bot > lvl])
+        if p.stop_mode == "atr":
+            stop = entry - p.stop_atr * atr if side == "LONG" else entry + p.stop_atr * atr
+            stop_atr = p.stop_atr
         else:
-            cands = sorted([z.top for z in sup if z.top < lvl], reverse=True)
+            stop = state["bot"] - buf if side == "LONG" else state["bot"] + buf
+            stop_atr = None
+        if side == "LONG":
+            zone = sorted([z.bot for z in res if z.bot > lvl])
+            liq = sorted([l.price for l in (bsl or []) if not l.consumed and l.price > entry])
+        else:
+            zone = sorted([z.top for z in sup if z.top < lvl], reverse=True)
+            liq = sorted([l.price for l in (ssl or []) if not l.consumed and l.price < entry], reverse=True)
         risk = abs(entry - stop)
         if risk <= 0:
             return None
-        target = None
-        for t in cands:
-            if side == "LONG" and (t - entry) / risk >= p.min_rr:
-                target = t
-                break
-            if side == "SHORT" and (entry - t) / risk >= p.min_rr:
-                target = t
-                break
-        fallback = target is None
-        if fallback:
-            target = entry + risk * p.target_r if side == "LONG" else entry - risk * p.target_r
+        cands = {"zone": zone, "liq": liq, "r": []}[p.m1_target]
+        target, fallback = _first_target(side, entry, risk, cands, p.min_rr, p.target_r)
         reasons = [f"{'존 상단' if side == 'LONG' else '존 하단'} {lvl:,.1f} 돌파 뒤 첫 리테스트 "
                    f"{'지지' if side == 'LONG' else '저항'}"]
-        reasons.append(f"손절 {stop:,.1f}(존 반대편) · 목표 {'1.5R 대체' if fallback else f'{target:,.1f}'}")
+        reasons.append(f"손절 {stop:,.1f}({'ATR' if stop_atr else '존 반대편'}) · "
+                       f"목표 {'1.5R 대체' if fallback else f'{target:,.1f}'}")
         return {
             "side": side, "kind": "M1", "label": ("M1-2" if m12 else "M1") + (" 롱" if side == "LONG" else " 숏"),
             "index": i, "time": c["t"], "entry": entry, "stop": stop, "target": target,
-            "rr": round(abs(target - entry) / risk, 2), "risk": risk, "atr": atr,
+            "rr": round(abs(target - entry) / risk, 2), "risk": risk, "atr": atr, "stop_atr": stop_atr,
             "rvol": None, "grade": "A" if primary else "B", "level": lvl, "zone": None,
             "reasons": reasons,
         }
+
+
+def _first_target(side: str, entry: float, risk: float, cands: Sequence[float],
+                  min_rr: float, target_r: float):
+    """목표 후보 중 최소 손익비를 넘는 첫 자리. 없으면 고정 배수 R.
+
+    반환: (목표가, 대체 여부). 대체했으면 True.
+    """
+    for t in cands:
+        if side == "LONG" and (t - entry) / risk >= min_rr:
+            return t, False
+        if side == "SHORT" and (entry - t) / risk >= min_rr:
+            return t, False
+    return (entry + risk * target_r if side == "LONG" else entry - risk * target_r), True
+
+
+def _vol_band_ok(p: Params, price: float, atr: float) -> bool:
+    """변동성 구간 필터 — ATR/가격%가 [min_atr_pct, max_atr_pct] 안인지."""
+    if price <= 0 or atr is None:
+        return False
+    pct = atr / price * 100
+    return p.min_atr_pct <= pct <= p.max_atr_pct
 
 
 def _rvol(candles: Sequence[Dict], i: int, period: int = 20) -> Optional[float]:

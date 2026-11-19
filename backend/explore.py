@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Sequence
 
 from .backtest import BacktestConfig, load_candles, simulate, summarize
-from .strategy import Engine, Params
+from .strategy import Engine, Params, resample
 
 KST = timezone(timedelta(hours=9))
 
@@ -95,6 +95,29 @@ def build_configs() -> List[Dict]:
     # G. 손익비 문턱(체결 시)
     for rr in (1.0, 1.5, 2.0):
         add(f"G 최소 손익비 {rr:.1f}R (통합)", c={"min_rr": rr})
+
+    # ---------------------------------------------------------------- 2026-11-19 구조 재설계 실험
+    # I. 손절을 변동성 고정(ATR)으로 두고 목표를 R 배수로 — 비용/R 비율을 낮추는 축
+    for atr in (1.5, 2.0, 3.0):
+        for rr in (2.0, 3.0, 4.0):
+            base = {"stop_mode": "atr", "stop_atr": atr}
+            tgt = {"target_mode": "r", "target_r": rr}
+            add(f"I {atr}ATR+{rr:.0f}R (통합)", p=base, c=tgt)
+            add(f"I {atr}ATR+{rr:.0f}R (M1)", p=base, c={**tgt, "allow_kinds": ("M1",)})
+            add(f"I {atr}ATR+{rr:.0f}R (더블S)", p=base, c={**tgt, "allow_kinds": ("DS",)})
+    # J. 시간 손절 — 추세가 안 오면 자른다
+    for bars in (48, 96):
+        add(f"J 3ATR·4R + {bars}봉 시간손절 (M1)", p={"stop_mode": "atr", "stop_atr": 3.0},
+            c={"target_mode": "r", "target_r": 4.0, "max_bars": bars, "allow_kinds": ("M1",)})
+    # K. 세션(UTC) — 유동성이 실리는 시간대만
+    for sess in ("asia", "london", "ny", "london_ny"):
+        add(f"K 3ATR·4R·96봉 {sess} (M1)", p={"stop_mode": "atr", "stop_atr": 3.0},
+            c={"target_mode": "r", "target_r": 4.0, "max_bars": 96,
+               "allow_kinds": ("M1",), "session_filter": sess})
+    # L. 변동성 구간 — ATR/가격%가 너무 낮은(죽은) 장은 건너뛴다
+    for lo in (0.2, 0.35, 0.5):
+        add(f"L 최소 변동성 ATR {lo:.2f}% (M1)", p={"stop_mode": "atr", "stop_atr": 3.0, "min_atr_pct": lo},
+            c={"target_mode": "r", "target_r": 4.0, "max_bars": 96, "allow_kinds": ("M1",)})
     return cfgs
 
 
@@ -134,13 +157,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--json", default=None, help="캔들 JSON 경로")
     ap.add_argument("--source", default="bitget", help="JSON 없이 받을 때 거래소")
     ap.add_argument("--limit", type=int, default=8200)
+    ap.add_argument("--tf", type=int, default=15, choices=[15, 30, 60], help="기준 시간봉(분, 15분봉에서 리샘플)")
     ap.add_argument("--split", type=float, default=0.6, help="인샘플 비율(앞 구간)")
     ap.add_argument("--json-out", default=None)
     ap.add_argument("--only", default=None, help="이름에 이 글자가 든 조합만 실행")
     args = ap.parse_args(argv)
 
     candles = _load(args.json, args.source, args.limit)
-    print(f"■ 데이터 {len(candles)}봉 ({kst(candles[0]['t'])} ~ {kst(candles[-1]['t'])}) · "
+    if args.tf != 15:
+        candles = resample(candles, args.tf)
+    print(f"■ 데이터 {len(candles)}봉 {args.tf}분 ({kst(candles[0]['t'])} ~ {kst(candles[-1]['t'])}) · "
           f"인샘플 {int(len(candles) * args.split)}봉 / 아웃샘플 {len(candles) - int(len(candles) * args.split)}봉")
     cfgs = build_configs()
     if args.only:

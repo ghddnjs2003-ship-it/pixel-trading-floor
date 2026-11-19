@@ -68,6 +68,69 @@ class SimulateTests(unittest.TestCase):
         self.assertEqual(len(out["trades"]), 0)        # 아직 청산 전 — 열린 채로 끝난다
 
 
+class StructuralExitTests(unittest.TestCase):
+    """2026-11-19 구조 재설계 옵션 — 세션 필터, ATR 고정 손절, 추적 청산, 목표 상한, 시간 손절."""
+
+    def setUp(self):
+        self.cfg = BacktestConfig(initial_equity=1_000.0, risk_pct=1.0, fee_bps=0.0,
+                                  slippage_bps=0.0, max_leverage=100)
+
+    def _sig(self, **kw):
+        base = {"index": 1, "side": "LONG", "kind": "M1", "grade": "A", "entry": 100.0,
+                "stop": 99.0, "target": 104.0, "rr": 4.0, "atr": 1.0, "reasons": []}
+        base.update(kw)
+        return base
+
+    def test_session_filter_blocks_entry_outside_hours(self):
+        # 봉 시각 1_700_000_000_000 = UTC 00:13. 세션을 (12,16)으로 두면 진입이 막힌다.
+        candles = [bar(1, 100, 101, 99, 100), bar(2, 100, 101, 99, 100), bar(3, 100, 103, 99, 102)]
+        blocked = simulate(candles, [self._sig()], BacktestConfig(**{**self.cfg.to_dict(),
+                                                                     "sessions": ((12, 16),)}))
+        self.assertEqual(len(blocked["trades"]), 0)
+        self.assertEqual(blocked["stats"]["skipped"]["세션제외"], 1)
+        allowed = simulate(candles, [self._sig()], BacktestConfig(**{**self.cfg.to_dict(),
+                                                                    "sessions": ((0, 4),)}))
+        self.assertEqual(len(allowed["trades"]), 1)
+
+    def test_atr_stop_is_measured_from_real_entry(self):
+        # 신호 종가 100, 다음 봉 시가 100.5, ATR 1.0 · 2배 → 손절 98.5 (신호가 99가 아니라)
+        candles = [bar(1, 100, 101, 99, 100), bar(2, 100.5, 101, 100, 100.5), bar(3, 100.5, 101, 98.0, 98.4)]
+        sig = self._sig(stop=99.0, stop_atr=2.0, target=110.0)
+        out = simulate(candles, [sig], self.cfg)
+        t = out["trades"][0]
+        self.assertEqual(t["entry"], 100.5)
+        self.assertAlmostEqual(t["stop"], 98.5, places=6)
+        self.assertEqual(t["reason"], "STOP")
+
+    def test_trail_exit_follows_peak(self):
+        cfg = BacktestConfig(**{**self.cfg.to_dict(), "exit_mode": "trail", "trail_atr": 2.0})
+        candles = [bar(1, 100, 101, 99, 100), bar(2, 100, 101, 99, 100),
+                   bar(3, 100, 104, 102.5, 103), bar(4, 103, 103.5, 101.5, 101.8)]
+        out = simulate(candles, [self._sig(target=200.0, stop_atr=1.0)], cfg)
+        t = out["trades"][0]
+        self.assertEqual(t["reason"], "TRAIL")
+        self.assertAlmostEqual(t["exit"], 102.0, places=6)   # 고점 104 − 2 × ATR 1
+        self.assertGreater(t["pnl"], 0)
+
+    def test_target_cap_trims_structure_target(self):
+        cfg = BacktestConfig(**{**self.cfg.to_dict(), "target_cap_r": 2.0})
+        candles = [bar(1, 100, 101, 99, 100), bar(2, 100, 101, 99, 100), bar(3, 100, 103, 99.5, 102.5)]
+        out = simulate(candles, [self._sig(stop_atr=1.0, target=140.0)], cfg)
+        t = out["trades"][0]
+        self.assertEqual(t["reason"], "TARGET")
+        self.assertAlmostEqual(t["exit"], 102.0, places=6)
+
+    def test_time_stop_closes_at_close(self):
+        cfg = BacktestConfig(**{**self.cfg.to_dict(), "max_bars": 2})
+        candles = [bar(1, 100, 101, 99, 100), bar(2, 100, 101, 99, 100),
+                   bar(3, 100, 100.5, 99.5, 100.2), bar(4, 100.2, 100.4, 99.8, 100.1),
+                   bar(5, 100.1, 100.3, 99.9, 100.0)]
+        out = simulate(candles, [self._sig(stop_atr=1.0, target=200.0)], cfg)
+        t = out["trades"][0]
+        self.assertEqual(t["reason"], "TIME")
+        self.assertEqual(t["bars"], 2)
+
+
 class SummaryTests(unittest.TestCase):
     def test_summary_math(self):
         cfg = BacktestConfig(initial_equity=1_000.0)
@@ -85,6 +148,8 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual(s["max_drawdown_pct"], 1.96)
         self.assertEqual(s["by_kind"]["DS"]["trades"], 2)
         self.assertEqual(s["by_kind"]["M1"]["win_rate_pct"], 50.0)
+        self.assertIn("monthly", s)
+        self.assertIn("by_side", s)
 
     def test_empty_summary_does_not_invent_numbers(self):
         s = summarize([], BacktestConfig(), 1_000.0)

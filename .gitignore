@@ -8,3 +8,13 @@ node_modules/
 __pycache__/
 *.pyc
 state.json
+
+# 실험용 장기 캔들(각 2~6MB) — 필요하면 `python -c "from backend.backtest import fetch_bitget..."`로 다시 받는다
+data/btc_15m_30000.json
+data/btc_15m_45000.json
+data/btc_15m_48000_2025.json
+data/btc_15m_holdout.json
+data/btc_30m_60000.json
+data/btc_60m_65000.json
+data/eth_15m_45000.json
+out/

@@ -3,8 +3,8 @@
 import unittest
 
 from backend.strategy import (
-    Engine, Params, atr_series, bollinger_width_series, cci_series, ema_series, evaluate,
-    pivots, resample, scan, sma_series, snapshot, _blank,
+    Engine, Level, Params, Zone, atr_series, bollinger_width_series, cci_series, ema_series,
+    evaluate, pivots, resample, scan, sma_series, snapshot, _blank,
 )
 
 
@@ -125,6 +125,69 @@ class SweepSignalTests(unittest.TestCase):
         p = Params(use_trend_filter=False, use_m1=False)
         sigs = Engine(p).run(cs)
         self.assertEqual(len([s for s in sigs if s["side"] == "LONG"]), 1)
+
+
+class StructuralOptionTests(unittest.TestCase):
+    """2026-11-19 구조 재설계 옵션 — ATR 고정 손절, 라벨·변동성 선별, 목표 기준, 방향 제한."""
+
+    def _series(self):
+        prices = [110.0] * 60
+        prices += [110 - i * 0.5 for i in range(30)]
+        prices += [95.0, 96.0, 97.0, 98.0, 99.0, 100.0, 101.0, 102.0, 103.0, 104.0, 105.0]
+        prices += [104.0, 103.0, 102.0, 101.0, 100.0, 99.0, 98.0, 97.0]
+        prices += [96.0, 97.5]
+        cs = candles_from(prices, volume=10.0, spread=0.4)
+        cs[-2]["l"] = 94.6
+        return cs
+
+    def test_atr_stop_mode_replaces_structure_stop(self):
+        cs = self._series()
+        base = dict(use_trend_filter=False, use_m1=False)
+        struct = [s for s in Engine(Params(**base)).run(cs) if s["kind"] == "DS"][0]
+        atr = [s for s in Engine(Params(stop_mode="atr", stop_atr=2.0, **base)).run(cs)
+               if s["kind"] == "DS"][0]
+        self.assertIsNone(struct["stop_atr"])
+        self.assertEqual(atr["stop_atr"], 2.0)
+        self.assertAlmostEqual(atr["stop"], atr["entry"] - 2.0 * atr["atr"])
+        self.assertNotAlmostEqual(struct["stop"], atr["stop"], places=4)
+
+    def test_empty_label_selection_suppresses_double_s(self):
+        cs = self._series()
+        sigs = Engine(Params(use_trend_filter=False, use_m1=False, ds_labels=())).run(cs)
+        self.assertFalse([s for s in sigs if s["kind"] == "DS"])
+
+    def test_volatility_band_can_switch_everything_off(self):
+        cs = self._series()
+        sigs = Engine(Params(min_atr_pct=50.0)).run(cs)
+        self.assertEqual(sigs, [])
+
+    def test_target_zone_uses_opposite_1h_zone(self):
+        cs = candles_from([100.0] * 10, spread=1.0)
+        eng = Engine(Params(stop_mode="atr", stop_atr=0.5, ds_target="zone", min_rr=1.5))
+        level = Level(price=99.0, born=0, pivot_bar=0)
+        res = [Zone(top=103.0, bot=101.0, mid=102.0, is_res=True, born=0)]
+        sig = eng._ds_signal(cs, 5, "LONG", "거부", 98.0, 1.0, level, [], [], "SSL", True, res, [])
+        self.assertAlmostEqual(sig["target"], 101.0)      # 반대편 존 하단
+        self.assertAlmostEqual(sig["stop"], 99.5)         # ATR 0.5배
+
+    def test_target_liquidity_uses_opposite_level(self):
+        cs = candles_from([100.0] * 10, spread=1.0)
+        eng = Engine(Params(stop_mode="atr", stop_atr=0.5, ds_target="liq", min_rr=1.5))
+        level = Level(price=99.0, born=0, pivot_bar=0)
+        bsl = [Level(price=104.0, born=0, pivot_bar=0)]
+        sig = eng._ds_signal(cs, 5, "LONG", "거부", 98.0, 1.0, level, bsl, [], "SSL", True, [], [])
+        self.assertAlmostEqual(sig["target"], 104.0)
+
+    def test_allow_sides_applies_to_m1_too(self):
+        cs = candles_from([100.0] * 40, spread=1.0)
+        state = {"bot": 98.0, "lvl": 101.0}
+        res = [Zone(top=103.0, bot=101.0, mid=102.0, is_res=True, born=0)]
+        short_only = Engine(Params(allow_sides=("SHORT",)))
+        self.assertIsNone(short_only._m1_signal(cs, 30, "LONG", True, state, res, [], 1.0, False, 101.0))
+        both = Engine(Params(allow_sides=("LONG", "SHORT")))
+        sig = both._m1_signal(cs, 30, "LONG", True, state, res, [], 1.0, False, 101.0)
+        self.assertIsNotNone(sig)
+        self.assertEqual(sig["side"], "LONG")
 
 
 class ApiTests(unittest.TestCase):
