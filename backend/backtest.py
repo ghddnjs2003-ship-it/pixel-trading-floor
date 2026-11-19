@@ -49,10 +49,18 @@ _OKX_BAR = {"1": "1m", "5": "5m", "15": "15m", "30": "30m", "60": "1H", "240": "
 _BITGET_BAR = {"1": "1m", "5": "5m", "15": "15m", "30": "30m", "60": "1H", "240": "4H", "D": "1D"}
 
 
-def _get_json(url: str, timeout: int = 20):
+def _get_json(url: str, timeout: int = 20, retries: int = 4):
+    """공개 API 호출 — 429(호출 한도)면 잠깐 쉬었다 다시. 장시간 이력 받을 때 필요하다."""
     req = Request(url, headers={"User-Agent": "pixel-trading-floor-backtest/1.0"})
-    with urlopen(req, timeout=timeout) as res:
-        return json.loads(res.read().decode("utf-8"))
+    for attempt in range(retries):
+        try:
+            with urlopen(req, timeout=timeout) as res:
+                return json.loads(res.read().decode("utf-8"))
+        except HTTPError as exc:
+            if exc.code == 429 and attempt < retries - 1:
+                time.sleep(2.0 * (attempt + 1))
+                continue
+            raise
 
 
 def _rows_to_candles(rows: Sequence[Sequence]) -> List[Dict]:
@@ -136,6 +144,7 @@ def fetch_bitget(symbol: str, interval: str, limit: int) -> List[Dict]:
         chunk = _rows_to_candles(rows)
         got = chunk + got
         end = chunk[0]["t"] - 1
+        time.sleep(0.25)
     return got[-limit:]
 
 
