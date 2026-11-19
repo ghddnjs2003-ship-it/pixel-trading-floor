@@ -8,7 +8,7 @@ from urllib.parse import urlencode
 from urllib.request import urlopen
 
 from .risk import KillSwitch, KillSwitchRules
-from .strategy import Params, evaluate
+from .strategy import Engine, Params, evaluate
 
 
 AGENTS = {
@@ -101,20 +101,43 @@ def _parse_answer(raw):
 
 
 class AnalysisOrchestrator:
-    def __init__(self, provider, market_loader=fetch_market, strategy_params=None, killswitch=None):
+    def __init__(self, provider, market_loader=fetch_market, strategy_params=None, killswitch=None,
+                 ai_filter=None, ai_filter_veto=True):
         self.provider = provider
         self.market_loader = market_loader
         # 더블 S + MDS v7 룰 엔진 — AI 판단 앞에 '규칙이 선 자리'를 함께 놓는다
         self.strategy_params = strategy_params or Params()
         self.killswitch = killswitch if killswitch is not None else KillSwitch(KillSwitchRules(), state_path=None)
+        # AI 맥락 필터 — 규칙이 선 자리를 Gemini가 다시 심사한다(없으면 이 단계를 건너뛴다)
+        self.ai_filter = ai_filter
+        self.ai_filter_veto = ai_filter_veto
 
     def _rule_view(self, candles):
-        """마지막 봉 기준 v7 판정. 캔들이 모자라거나 오류면 None(지어내지 않는다)."""
+        """마지막 봉 기준 v7 판정 + 그 봉의 엔진 상태. 캔들이 모자라거나 오류면 None(지어내지 않는다)."""
         try:
             sig = evaluate(candles, len(candles) - 1, self.strategy_params)
         except Exception as exc:                     # 규칙이 깨져도 분석 전체를 멈추지 않는다
-            return {"side": None, "reasons": [f"룰 엔진 오류: {exc}"]}
-        return sig
+            return {"side": None, "reasons": [f"룰 엔진 오류: {exc}"]}, None
+        snap = self._snapshot(candles) if sig.get("side") else None
+        return sig, snap
+
+    def _snapshot(self, candles):
+        """마지막 봉까지의 존·레벨·지표 — AI 필터의 문맥(미래 봉은 보지 않는다)."""
+        try:
+            eng = Engine(self.strategy_params)
+            eng.run(candles, capture_at=[len(candles) - 1])
+            return eng.capture.get(len(candles) - 1)
+        except Exception:
+            return None
+
+    def _ai_review(self, rule, candles, snap):
+        """AI 필터 한 번. 실패는 통과로 두고 이유를 남긴다(매매를 멈추지 않는다)."""
+        try:
+            verdict = self.ai_filter.review(rule, candles=candles, snap=snap)
+        except Exception as exc:
+            verdict = {"decision": "PASS", "reason": f"AI 필터 오류: {exc}", "error": str(exc)}
+        return {k: verdict.get(k) for k in
+                ("decision", "loss_prob", "reason", "confidence", "model", "cached", "error")}
 
     def run(self, symbol, emit):
         market = self.market_loader(symbol)
@@ -137,7 +160,7 @@ class AnalysisOrchestrator:
         }
 
         # v7 룰 엔진(더블 S + MDS) 판정을 자료로 넣는다 — AI는 규칙이 선 자리를 확인하고 말한다
-        rule = self._rule_view(market["candles"])
+        rule, rule_snap = self._rule_view(market["candles"])
         if rule and rule.get("side"):
             context["v7 규칙 판정"] = {
                 "근거": rule.get("kind"), "라벨": rule.get("label"), "방향": rule.get("side"),
@@ -150,6 +173,17 @@ class AnalysisOrchestrator:
         else:
             context["v7 규칙 판정"] = {"방향": "없음", "이유": (rule or {}).get("reasons") or ["조건 미충족"]}
             emit({"type": "log", "kind": "sys", "line": "> v7 규칙: 이번 봉에는 진입 자리가 없습니다"})
+
+        # AI 맥락 필터 — 규칙이 선 자리만 심사한다(자리가 없으면 호출하지 않는다 = 한도 절약)
+        ai_view = None
+        if self.ai_filter is not None and (rule or {}).get("side"):
+            ai_view = self._ai_review(rule, market["candles"], rule_snap)
+            context["AI 맥락 필터"] = ai_view
+            prob = ai_view.get("loss_prob")
+            mark = "⛔ REJECT" if ai_view.get("decision") == "REJECT" else "✅ PASS"
+            emit({"type": "log", "kind": "sys",
+                  "line": f"> AI 맥락 필터: {mark}" + (f" · 손절확률 {prob:g}" if isinstance(prob, (int, float)) else "")
+                          + (f" · {ai_view.get('reason')}" if ai_view.get("reason") else "")})
         history = []
         turns = [
             ("analysts", [("taro", None), ("diana", None), ("nova", None), ("vibe", None)]),
@@ -188,6 +222,13 @@ class AnalysisOrchestrator:
         if action not in ("BUY", "SELL", "HOLD"):
             action = "HOLD"
 
+        # AI 맥락 필터 거부 — 규칙이 선 자리라도 문맥이 무너졌으면 진입 대신 관망
+        ai_note = None
+        if (ai_view and self.ai_filter_veto and ai_view.get("decision") == "REJECT" and action != "HOLD"):
+            ai_note = f"AI 맥락 필터 거부: {ai_view.get('reason') or '문맥 위험'}"
+            emit({"type": "log", "kind": "sys", "line": f"> ⛔ {ai_note} — 진입 대신 관망으로 바꿉니다"})
+            action = "HOLD"
+
         # 킬스위치 — 오늘 이미 한도에 닿았으면 AI 판단과 무관하게 진입하지 않는다
         gate = self.killswitch.allow_entry()
         gate_note = None
@@ -217,6 +258,7 @@ class AnalysisOrchestrator:
                 "rr": (rule or {}).get("rr"), "reasons": (rule or {}).get("reasons") or [],
             },
             "killswitch": {"ok": bool(gate.get("ok")), "reason": gate.get("reason"), "blocked": gate_note},
+            "ai_filter": ai_view, "ai_filter_blocked": ai_note,
         })
         emit({"type": "log", "kind": "stage", "line": f">>> 최종 판정: {action} ({confidence}%) · PM {verdict}"})
         emit({"type": "run:end"})

@@ -312,6 +312,9 @@ class Engine:
         self.p = params or Params()
         self.state: Dict = {"bsl": [], "ssl": [], "res": [], "sup": []}
         self.signals: List[Dict] = []
+        # 신호 시점의 엔진 상태 스냅숏(존·레벨·지표). run(capture_at=...)로 원하는 봉만 담는다.
+        # AI 맥락 필터가 "그 봉까지의 정보"만 쓰게 하려면 이 스냅숏을 써야 한다(미래 참조 없음).
+        self.capture: Dict[int, Dict] = {}
 
     # -- 준비 ---------------------------------------------------------------
     def _prepare(self, candles: Sequence[Dict]) -> Dict:
@@ -357,8 +360,11 @@ class Engine:
                 "ema4": ema4, "closed4": closed4}
 
     # -- 본체 ---------------------------------------------------------------
-    def run(self, candles: Sequence[Dict]) -> List[Dict]:
+    def run(self, candles: Sequence[Dict], capture_at: Optional[Sequence[int]] = None) -> List[Dict]:
         p = self.p
+        # capture_at=None 이면 '신호가 새로 선 봉'마다 스냅숏을 남긴다(빈 목록이면 남기지 않음)
+        want = None if capture_at is None else set(int(x) for x in capture_at)
+        self.capture = {}
         pre = self._prepare(candles)
         atr, ema_fast, ema_slow, cci = pre["atr"], pre["ema_fast"], pre["ema_slow"], pre["cci"]
         bbw, bbw_avg, volsma = pre["bbw"], pre["bbw_avg"], pre["volsma"]
@@ -387,6 +393,7 @@ class Engine:
         for i in range(len(candles)):
             c = candles[i]
             a = atr[i]
+            sig_before = len(signals)
             if a is None or ema_fast[i] is None or ema_slow[i] is None:
                 continue
 
@@ -640,6 +647,18 @@ class Engine:
                     consec_short += 1
                     consec_long = 0
 
+            # 이 봉이 끝난 시점의 상태 스냅숏(신호 봉의 문맥을 나중에 읽기 위해)
+            if (want is None and len(signals) > sig_before) or (want is not None and i in want):
+                self.capture[i] = {
+                    "atr": a, "ema20": ema_fast[i], "ema50": ema_slow[i],
+                    "cci": cci[i], "bbw": bbw[i], "bbw_avg": bbw_avg[i],
+                    "volsma": volsma[i], "rvol": _rvol(candles, i, p.vol_len),
+                    "htf_ema": ema4[k4] if k4 >= 0 else None,
+                    "res": [z.to_dict() for z in res], "sup": [z.to_dict() for z in sup],
+                    "bsl": [l.price for l in bsl if not l.consumed],
+                    "ssl": [l.price for l in ssl if not l.consumed],
+                }
+
         self.state = {"bsl": bsl, "ssl": ssl, "res": res, "sup": sup}
         self.signals = signals
         return signals
@@ -774,10 +793,15 @@ def _rvol(candles: Sequence[Dict], i: int, period: int = 20) -> Optional[float]:
 
 # ----------------------------------------------------------------------------- 공개 API
 
-def scan(candles: Sequence[Dict], params: Optional[Params] = None, start: int = 0) -> List[Dict]:
-    """전 구간 신호 목록. 신호는 봉이 끝난 뒤 확정되고, 진입은 다음 봉 시가(호출부 책임)."""
+def scan(candles: Sequence[Dict], params: Optional[Params] = None, start: int = 0,
+         engine: Optional[Engine] = None) -> List[Dict]:
+    """전 구간 신호 목록. 신호는 봉이 끝난 뒤 확정되고, 진입은 다음 봉 시가(호출부 책임).
+
+    engine을 넘기면 그 엔진을 그대로 돌려 capture(신호 봉 스냅숏)를 꺼내 쓸 수 있다.
+    """
     p = params or Params()
-    signals = Engine(p).run(candles)
+    eng = engine or Engine(p)
+    signals = eng.run(candles)
     if start <= 0:
         return signals
     return [s for s in signals if s["index"] >= start]

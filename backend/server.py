@@ -2,12 +2,13 @@
 
 import json
 import queue
+import re
 import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
-from .config import get_port, get_provider_config
+from .config import ai_filter_enabled, ai_filter_is_veto, get_ai_filter_config, get_port, get_provider_config
 from .orchestrator import AnalysisOrchestrator
 from .providers import ChatCompletionProvider
 
@@ -30,11 +31,24 @@ def publish(event):
             pass
 
 
+def build_ai_filter():
+    """설정이 켜져 있고 키가 있으면 필터를 만든다. 없으면 None(13인 분석은 그대로 돈다)."""
+    if not ai_filter_enabled():
+        return None
+    try:
+        from .ai_filter import AIFilter
+        return AIFilter(get_ai_filter_config())
+    except Exception as exc:              # 필터가 안 서도 분석·시세는 계속
+        print(f"[ai-filter] 비활성: {exc}")
+        return None
+
+
 def run_analysis(symbol):
     global RUNNING
     try:
         provider = ChatCompletionProvider(get_provider_config())
-        AnalysisOrchestrator(provider).run(symbol, publish)
+        AnalysisOrchestrator(provider, ai_filter=build_ai_filter(),
+                             ai_filter_veto=ai_filter_is_veto()).run(symbol, publish)
     except Exception as exc:
         publish({"type": "run:error", "message": str(exc)})
         publish({"type": "log", "kind": "sys", "line": f"> ⚠ 분석 실패: {exc}"})
@@ -42,6 +56,65 @@ def run_analysis(symbol):
     finally:
         with RUN_LOCK:
             RUNNING = False
+
+
+def run_live_filter(payload):
+    """실시간 M1+AI 필터 모의판단 — 최근 캔들에서 v7 후보를 찾아 Gemini에게 한 번 심사시킨다.
+
+    주문은 내지 않는다. 돌려주는 것은 '지금 이 자리라면 필터가 뭐라고 하는가'뿐이다.
+    """
+    from .ai_filter import AIFilter, build_context, nominee_setup, prepare_series, select_signals
+    from .backtest import load_candles
+    from .strategy import Engine
+
+    raw = str(payload.get("symbol", "BTC")).strip().upper()
+    base = re.sub(r"[-_/]?(USDT|USD|PERP)$", "", raw)
+    if not re.fullmatch(r"[A-Z0-9]{2,15}", base or ""):
+        raise ValueError("심볼을 영문으로 입력하세요 (예: BTC)")
+    interval = str(payload.get("interval", "30"))
+    if interval not in ("15", "30", "60"):
+        raise ValueError("interval은 15 / 30 / 60 중 하나입니다")
+    try:
+        limit = max(500, min(10000, int(payload.get("limit", 3000))))
+        max_age = max(1, min(500, int(payload.get("max_age_bars", 96))))
+    except (TypeError, ValueError):
+        raise ValueError("limit·max_age_bars는 숫자입니다") from None
+
+    ticker = base + "USDT"
+    data = load_candles(ticker, interval, limit, "auto")
+    candles = data["candles"]
+    params, cfg = nominee_setup()
+    engine = Engine(params)
+    signals = select_signals(candles, engine.run(candles), cfg)
+    if not signals:
+        return {"ok": True, "symbol": ticker, "interval": int(interval), "source": data.get("source"),
+                "signal": None, "filter": None,
+                "note": f"최근 {len(candles)}봉에서 후보1 조건(30분 M1·아시아·3ATR·4R)에 맞는 자리가 없습니다"}
+    sig = signals[-1]
+    age = len(candles) - 1 - int(sig["index"])
+    if age > max_age:
+        return {"ok": True, "symbol": ticker, "interval": int(interval), "source": data.get("source"),
+                "signal": None, "filter": None,
+                "note": f"마지막 후보가 {age}봉 전이라 지금 심사할 자리가 아닙니다(기준 {max_age}봉 이내)"}
+
+    ai = AIFilter(get_ai_filter_config())
+    snap = engine.capture.get(sig["index"])
+    context = build_context(candles, sig, snap, prepare_series(candles), ai.cfg, trade_cfg=cfg)
+    verdict = ai.review(sig, context)
+    return {
+        "ok": True, "symbol": ticker, "interval": int(interval), "source": data.get("source"),
+        "bars": len(candles), "age_bars": age,
+        "signal": {k: sig.get(k) for k in ("side", "kind", "label", "grade", "index", "time",
+                                            "entry", "stop", "target", "rr", "reasons")},
+        "trade_plan": {"entry": sig["entry"], "stop": sig["stop"],
+                       "target": round(sig["entry"] + (sig["entry"] - sig["stop"]) * cfg.target_r, 2)
+                       if sig["side"] == "LONG" else round(sig["entry"] - (sig["stop"] - sig["entry"]) * cfg.target_r, 2),
+                       "target_r": cfg.target_r, "max_bars": cfg.max_bars, "session": cfg.session_filter},
+        "filter": verdict,
+        "context": context,
+        "model": (ai.provider.config.get("model") if ai.provider else None),
+        "calls": ai.calls, "cached": bool(verdict.get("cached")),
+    }
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -56,7 +129,11 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         global RUNNING
-        if urlparse(self.path).path != "/api/analyze":
+        path = urlparse(self.path).path
+        if path == "/api/ai-filter":
+            self.handle_ai_filter()
+            return
+        if path != "/api/analyze":
             self.send_error(404)
             return
         try:
@@ -77,6 +154,25 @@ class Handler(SimpleHTTPRequestHandler):
             RUNNING = True
         threading.Thread(target=run_analysis, args=(symbol.strip(),), daemon=True).start()
         self.send_json(202, {"ok": True})
+
+    def handle_ai_filter(self):
+        """실시간 후보 심사 — 읽기 전용(주문 없음). 결과는 JSON 하나."""
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if length <= 0 or length > 8192:
+                raise ValueError("요청 크기가 올바르지 않습니다")
+            body = json.loads(self.rfile.read(length).decode("utf-8"))
+            if not isinstance(body, dict):
+                raise ValueError("JSON 객체를 보내세요")
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+            self.send_json(400, {"ok": False, "error": str(exc)})
+            return
+        try:
+            self.send_json(200, run_live_filter(body))
+        except ValueError as exc:
+            self.send_json(400, {"ok": False, "error": str(exc)})
+        except Exception as exc:                       # 시세·AI 실패는 502로 알린다
+            self.send_json(502, {"ok": False, "error": str(exc)})
 
     def stream_events(self):
         subscriber = queue.Queue(maxsize=256)

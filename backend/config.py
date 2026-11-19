@@ -116,3 +116,57 @@ def get_killswitch_rules():
         volatility_pause_atr_pct=_f("KILL_VOLATILITY_ATR_PCT", KillSwitchRules.volatility_pause_atr_pct),
         cooldown_minutes=int(_f("KILL_COOLDOWN_MINUTES", KillSwitchRules.cooldown_minutes)),
     )
+
+
+# ------------------------------------------------------------------ AI 맥락 필터
+
+def ai_filter_enabled():
+    """AI_FILTER=on/off/auto. auto면 제공자 키가 있는지로 정한다(없으면 조용히 끔)."""
+    load_env_file()
+    raw = os.getenv("AI_FILTER", "auto").strip().lower() or "auto"
+    if raw in ("off", "0", "false", "no"):
+        return False
+    if raw in ("on", "1", "true", "yes"):
+        return True
+    try:
+        get_provider_config()
+        return True
+    except ProviderError:
+        return False
+
+
+def get_ai_filter_config():
+    """AI 맥락 필터 설정. 키·모델은 이 디렉터리의 .env에서만 읽는다(브라우저로 내려가지 않는다)."""
+    from .ai_filter import FilterConfig
+
+    load_env_file()
+
+    def _f(key, default):
+        try:
+            return float(os.getenv(key, default))
+        except (TypeError, ValueError):
+            return default
+
+    def _i(key, default):
+        try:
+            return int(float(os.getenv(key, default)))
+        except (TypeError, ValueError):
+            return default
+
+    on_error = (os.getenv("AI_FILTER_ON_ERROR", "pass").strip().lower() or "pass")
+    return FilterConfig(
+        provider=os.getenv("AI_FILTER_PROVIDER", "").strip(),
+        model=os.getenv("AI_FILTER_MODEL", "").strip(),
+        min_interval=_f("AI_FILTER_MIN_INTERVAL", 2.0),
+        cache_path=os.getenv("AI_FILTER_CACHE", str(BACKEND_DIR.parent / "data" / "ai_cache.json")).strip(),
+        max_calls=_i("AI_FILTER_MAX_CALLS", 0),
+        on_error="reject" if on_error == "reject" else "pass",
+        loss_threshold=_f("AI_FILTER_THRESHOLD", 60.0),
+        prompt_version=os.getenv("AI_FILTER_PROMPT_VERSION", "ctx-v2").strip() or "ctx-v2",
+    )
+
+
+def ai_filter_is_veto():
+    """AI_FILTER_VETO=on이면 13인 분석의 최종 진입을 필터 REJECT가 HOLD로 내린다(기본 on)."""
+    load_env_file()
+    return (os.getenv("AI_FILTER_VETO", "on").strip().lower() or "on") not in ("off", "0", "false", "no")

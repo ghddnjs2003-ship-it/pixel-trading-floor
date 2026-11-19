@@ -45,7 +45,9 @@ PROVIDER_SPECS = {
     "gemini": {
         "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
         "key_env": "GEMINI_API_KEY", "model_env": "GEMINI_MODEL",
-        "model": "gemini-2.0-flash", "json_mode": True, "timeout": 45,
+        # 2026-11 확인: gemini-2.0-flash는 신규 사용자에게 404(폐기). 3.8/3.7-flash는 응답 지연·503이 잦음
+        "model": "gemini-3.5-flash-lite", "fallbacks": ("gemini-3.1-flash-lite", "gemini-flash-lite-latest"),
+        "json_mode": True, "timeout": 45,
         "label": "Google Gemini (무료 한도)",
     },
     "openrouter": {
@@ -103,7 +105,19 @@ class ChatCompletionProvider:
         self.timeout = timeout or int(config.get("timeout") or spec.get("timeout", 45))
         self.json_mode = bool(config.get("json_mode", spec.get("json_mode", True)))
         self.retries = int(config.get("retries", 1))
+        self.fallbacks = tuple(config.get("fallbacks") or spec.get("fallbacks") or ())
+        self.model_index = 0
+        self.model_used = config.get("model")
         self.last_usage = None
+
+    def _next_model(self, payload):
+        """모델이 폐기(404·not found)됐으면 대체 모델로 한 번씩 넘어간다."""
+        if self.model_index >= len(self.fallbacks):
+            return False
+        self.model_index += 1
+        payload["model"] = self.fallbacks[self.model_index - 1]
+        self.model_used = payload["model"]
+        return True
 
     def complete(self, system_prompt, user_prompt):
         payload = {
@@ -122,11 +136,13 @@ class ChatCompletionProvider:
             try:
                 return self._post(payload)
             except ProviderError as exc:
-                # 429(한도) · 5xx는 잠깐 쉬고 한 번 더. 그 외는 그대로 올린다
+                # 폐기된 모델 → 대체 모델 / 429(한도)·5xx는 잠깐 쉬고 한 번 더. 그 외는 그대로 올린다
+                if getattr(exc, "model_missing", False) and self._next_model(payload):
+                    continue
                 if attempt >= self.retries or not getattr(exc, "retryable", False):
                     raise
                 attempt += 1
-                time.sleep(2 * attempt)
+                time.sleep(5 * attempt)        # 429(분당 한도)는 몇 초 쉬면 풀린다
 
     def _post(self, payload):
         body = json.dumps(payload).encode("utf-8")
@@ -147,6 +163,9 @@ class ChatCompletionProvider:
             err = ProviderError(f"{self.config.get('provider')} HTTP {exc.code}"
                                 + (f" — {detail}" if detail else ""))
             err.retryable = exc.code == 429 or 500 <= exc.code < 600
+            # 모델 이름이 폐기·오타인 경우 — 대체 모델이 있으면 넘어간다(키 문제와 구분한다)
+            err.model_missing = exc.code == 404 or "no longer available" in detail or (
+                exc.code == 400 and "model" in detail.lower() and "not found" in detail.lower())
             raise err from None
         except (URLError, TimeoutError) as exc:
             reason = getattr(exc, "reason", "timeout")
