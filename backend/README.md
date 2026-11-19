@@ -79,6 +79,7 @@ python -m backend.server                  # http://127.0.0.1:8765/index.html?eng
 ### 실측 — 후보1 아웃샘플 포함 (2026-11-19, 30분 60,000봉 2023-06~2026-11)
 
 `python -m backend.ai_filter --json data/btc_30m_60000.json --native --json-out out/ai_filter_nominee.json`
+결과 요약은 `data/ai_filter_candidate1_2026-11-19.json`에 남겼다(거래 목록·문맥은 빼고 표만).
 심사 152건(체결 후보 143건 + 포지션 중복 9건) · PASS 92 / REJECT 60(39.5%) · 호출 152회 · 오류 0 ·
 `gemini-3.5-flash-lite` · 평균 3~4초
 
