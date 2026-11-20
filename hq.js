@@ -659,12 +659,7 @@ const HQ = (() => {
     if (!st || !st.config) return;
     S.ap = st;
     // 레버리지 배율 — 선택 상자·화면 곳곳의 "20x" 표기를 설정값으로
-    if (st.risk && fin(st.risk.leverage) > 0) {
-      setLevUI(st.risk.leverage);
-      document.querySelectorAll('.dp-scalp-head').forEach((el) => {
-        el.textContent = el.textContent.replace(/\d+x/, window.LEV + 'x');
-      });
-    }
+    if (st.risk && fin(st.risk.leverage) > 0) setLevUI(st.risk.leverage);
     document.body.classList.toggle('no-life', st.config.officeLife === false);
     renderChip();
     renderTv();
@@ -793,7 +788,42 @@ const HQ = (() => {
     window.LEV = v;
     const rl = $('#scalp-room-label');
     if (rl) rl.textContent = rl.textContent.replace(/\d+x/, v + 'x');
+    document.querySelectorAll('.dp-scalp-head').forEach((el) => {
+      el.textContent = el.textContent.replace(/\d+x/, v + 'x');
+    });
     updateLevWarn();
+  }
+
+  /* 🎚️ 배율을 고르면 (2026-11-20 홍원 님 요청 — 픽셀 오피스에서도 레버리지 조절)
+     ① 두 선택 상자·방 라벨·경고를 맞추고 ② 저장해 새로고침해도 유지하고
+     ③ 이미 준비된 진입 계획(🚀 모의 진입)이 있으면 새 배율로 진입·손절·청산가를 다시 계산한다. */
+  async function applyLeverage(v) {
+    const lev = Math.round(Number(v));
+    if (!(lev >= 1 && lev <= 125)) return;
+    setLevUI(lev);
+    // ② 저장 — 앱 화면은 /api/settings/risk가 남긴다(데모는 localStorage). 서버가 없어도 화면은 그대로 쓴다
+    try {
+      const r = await fetch('/api/settings/risk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ leverage: lev }),
+      });
+      const d = r.ok ? await r.json().catch(() => null) : null;
+      if (d && d.risk) { S.ap = S.ap || {}; S.ap.risk = d.risk; }
+    } catch (_) { /* 구버전 서버 — 화면 설정만 쓴다 */ }
+    if (!(S.ap && S.ap.risk)) S.ap = Object.assign({}, S.ap, { risk: {} });
+    if (S.ap && S.ap.risk) S.ap.risk.leverage = lev;
+    if (window.LITE && window.LITE.settings) { try { window.LITE.settings.lev = lev; } catch (_) { /* 무시 */ } }
+    // ③ 대기 중인 진입 계획이 있으면 새 배율로 다시 계산 — 엔진이 levels·entry:ready 이벤트를 다시 보낸다
+    const eng = window.LITE && window.LITE.engine;
+    const say = (msg, kind) => { if (typeof toast === 'function') toast(msg, kind); };
+    if (eng && typeof eng.retuneLev === 'function') {
+      const r = eng.retuneLev(lev);
+      if (r && r.code === 'RETUNED') { say(`🎚️ ${lev}배 — 진입·손절·청산가를 ${lev}배 기준으로 다시 계산했습니다`, 'ok'); return; }
+      if (r && r.code === 'GATE') { say(`⚠ ${lev}배에서는 손절이 청산가보다 늦어 진입을 접었습니다 — 다시 분석해 주세요`, 'err'); return; }
+      if (r && r.code === 'RUNNING') { say(`🎚️ ${lev}배 — 지금 분석이 끝나는 대로 이 배율로 계산합니다`, 'ok'); return; }
+    }
+    say(`🎚️ 레버리지 ${lev}배 — 다음 ◆ 정밀 분석부터 이 배율로 계산합니다`, 'ok');
   }
 
   // 배율을 고르면 청산까지 여유·왕복 수수료를 바로 보여 준다 (격리 기준)
@@ -1263,20 +1293,35 @@ const HQ = (() => {
     }
     if (c) c.textContent = '확신 ' + (Number(ev.confidence) || 0) + '%';
     const src = sc || ev;
-    if (l) {
-      // "83,686 돌파 확인 후 진입" 같은 문장에서 가격만 뽑아 칸에 넣는다. 원문은 길게 누르면(title) 보인다
-      const e = pickPrice(src.entry);
-      const s = pickPrice(src.stop);
-      const t = pickPrice(src.target);
-      const dist = (p) => (e && p ? ((p.n - e.n) / e.n) * 100 : null);
-      const cell = (cls, name, p, raw, d) => {
-        const dTxt = d == null ? '' : `<em>${d > 0 ? '+' : ''}${Math.abs(d) >= 10 ? d.toFixed(0) : d.toFixed(2)}%</em>`;
-        return `<span class="mv-cell ${cls}" title="${escH(raw || '')}"><i>${name}${dTxt}</i><b>${escH(p ? p.s : raw ? '조건부' : '—')}</b></span>`;
-      };
-      l.innerHTML =
-        cell('entry', '진입', e, src.entry, null) +
-        cell('stop', '손절', s, src.stop, dist(s)) +
-        cell('target', '목표', t, src.target, dist(t));
+    if (l) l.innerHTML = levelCells(src.entry, src.stop, src.target);
+  }
+
+  // 진입·손절·목표 칸 — "83,686 돌파 확인 후 진입" 같은 문장에서 가격만 뽑는다. 원문은 길게 누르면(title) 보인다
+  function levelCells(entryRaw, stopRaw, targetRaw) {
+    const e = pickPrice(entryRaw);
+    const s = pickPrice(stopRaw);
+    const t = pickPrice(targetRaw);
+    const dist = (p) => (e && p ? ((p.n - e.n) / e.n) * 100 : null);
+    const cell = (cls, name, p, raw, d) => {
+      const dTxt = d == null ? '' : `<em>${d > 0 ? '+' : ''}${Math.abs(d) >= 10 ? d.toFixed(0) : d.toFixed(2)}%</em>`;
+      return `<span class="mv-cell ${cls}" title="${escH(raw || '')}"><i>${name}${dTxt}</i><b>${escH(p ? p.s : raw ? '조건부' : '—')}</b></span>`;
+    };
+    return cell('entry', '진입', e, entryRaw, null) +
+      cell('stop', '손절', s, stopRaw, dist(s)) +
+      cell('target', '목표', t, targetRaw, dist(t));
+  }
+
+  // 🎚️ 배율만 바꿔 다시 계산했을 때(levels 이벤트) — 휴대폰 판정 줄의 숫자와 배율 표기를 맞춘다
+  function updateVerdictLevels(ev) {
+    const box = $('#m-verdict');
+    if (!box || box.classList.contains('empty')) return;
+    const l = $('#mv-levels');
+    if (l) l.innerHTML = levelCells(ev.entry, ev.stop, ev.target);
+    const a = $('#mv-action');
+    if (a && window.LEV) {
+      const sm = a.querySelector('small');
+      if (sm) sm.textContent = window.LEV + 'x';
+      else { const n = document.createElement('small'); n.textContent = window.LEV + 'x'; a.appendChild(n); }
     }
   }
 
@@ -1473,6 +1518,11 @@ const HQ = (() => {
         });
         break;
       }
+      case 'levels': {
+        // 배율을 바꿔 대기 중인 진입 계획을 다시 계산 — 판정 글자는 그대로, 숫자만 새 배율
+        updateVerdictLevels(ev);
+        break;
+      }
       case 'position':
         if (ev.action === 'open' && ev.position) {
           const p = ev.position;
@@ -1537,10 +1587,10 @@ const HQ = (() => {
     if (run) run.addEventListener('click', () => saveAp({ enabled: true, runNow: true }));
     const once = $('#once-run');
     if (once) once.addEventListener('click', runOnce);
-    // 두 선택 상자는 항상 같은 값 — 하나를 바꾸면 다른 쪽도 따라간다
+    // 두 선택 상자는 항상 같은 값 — 하나를 바꾸면 다른 쪽도 따라간다(저장 + 대기 중 계획 재계산)
     ['#lev-select', '#once-lev'].forEach((sel) => {
       const el = $(sel);
-      if (el) el.addEventListener('change', () => setLevUI(Number(el.value)));
+      if (el) el.addEventListener('change', () => applyLeverage(Number(el.value)));
     });
     const osym = $('#once-symbol');
     if (osym) {

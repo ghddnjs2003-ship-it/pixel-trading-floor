@@ -49,6 +49,7 @@
   }
 
   // 레버리지 — 방문자가 고른 값은 저장, 시연 화면(fixedLev)은 늘 같은 배율이고 방문자 설정을 건드리지 않는다
+  // 2026-11-20 홍원 님 요청: 화면에서 고른 배율이 그대로 판정·진입에 쓰인다(기본 20배, 새로고침해도 유지)
   function createSettings(storage, opts = {}) {
     const ok = (v) => v >= 1 && v <= 125;
     let mem = null;
@@ -108,6 +109,16 @@
           risk: { leverage: ctx.settings.lev, maintenanceMarginPct: 0.5, feePct: 0 },
           running: ctx.engine.isRunning(), nextRunAt: null, lastRun: null, lastSkip: null, cyclesToday: 0, estCallsPerHour: 0, callsPerRun: 0,
         });
+      }
+      // 레버리지 저장 — 화면에서 배율을 고르면 바로 여기로 온다(새로고침해도 유지). 다음 분석부터 이 배율로 계산한다
+      if (method === 'POST' && p === '/api/settings/risk') {
+        const lev0 = Math.round(Number((body || {}).leverage));
+        if (!(lev0 >= 1 && lev0 <= 125)) return json(400, { ok: false, error: '레버리지는 1~125배로 입력하세요' });
+        ctx.settings.lev = lev0;
+        return json(200, { ok: true, risk: { leverage: ctx.settings.lev, maintenanceMarginPct: 0.5, feePct: 0 } });
+      }
+      if (method === 'GET' && p === '/api/settings/risk') {
+        return json(200, { ok: true, risk: { leverage: ctx.settings.lev, maintenanceMarginPct: 0.5, feePct: 0 } });
       }
       if (method === 'POST' && p === '/api/analyze') {
         if (ctx.engine.isRunning()) return json(409, { ok: false, error: '이미 분석이 진행 중입니다.' });
@@ -204,8 +215,11 @@
     const kiosk = new URLSearchParams(win.location.search).get('kiosk') === '1';
     let storage = null;
     try { storage = win.localStorage; } catch (_) { storage = null; }
-    // 데모 버전은 100배 고정(대표 결정 2026-10-01: 빨리 체결돼야 재밌다) — 시연 화면도 같다
-    const settings = createSettings(storage, { fixedLev: win.LiteBrain ? win.LiteBrain.RULES.defaultLev : 100 });
+    // 시연 화면(?kiosk=1)만 100배 고정 — 방문자 계좌·설정을 건드리지 않는다.
+    // 앱 화면은 방문자가 고른 배율을 쓰고 저장한다(2026-11-20 홍원 님 요청 — 100배 고정 해제)
+    const settings = kiosk
+      ? createSettings(storage, { fixedLev: win.LiteBrain ? win.LiteBrain.RULES.defaultLev : 100 })
+      : createSettings(storage);
     const bus = win.LiteEngine.createBus();
     // 소개 페이지 시연 화면은 방문자 계좌를 건드리지 않게 메모리 계좌를 쓴다
     const paper = win.LitePaper.create({ storage: kiosk ? null : storage });

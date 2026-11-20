@@ -31,8 +31,8 @@
   </script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/galmuri/dist/galmuri.css">
   <link rel="stylesheet" href="style.css?v=14">
-  <link rel="stylesheet" href="hq.css">
-  <link rel="stylesheet" href="lite/lite.css">
+  <link rel="stylesheet" href="hq.css?v=21">
+  <link rel="stylesheet" href="lite/lite.css?v=21">
   <link rel="stylesheet" href="lite/screener.css">
   <link rel="stylesheet" href="lite/global.css">
   <link rel="stylesheet" href="lite/pro.css?v=4">
@@ -64,9 +64,11 @@
           <button id="mode-scalp" class="mode-btn" type="button">⚡스캘핑</button>
           <button id="mode-attack" class="mode-btn" type="button">⚔공격</button>
         </div>
-        <select id="lev-select" class="lev-select" title="레버리지 — 이번 분석부터 적용 (스캘핑·공격)" aria-label="레버리지">
-          <option value="5">5배</option><option value="10">10배</option><option value="20">20배</option><option value="25">25배</option>
-          <option value="50">50배</option><option value="75">75배</option><option value="90">90배</option>
+        <!-- 레버리지 — 고른 배율이 진입·손절·목표·청산가·리스크 게이트와 모의 포지션에 그대로 쓰인다 -->
+        <select id="lev-select" class="lev-select" title="레버리지 — 고른 배율로 진입·손절·청산가를 계산합니다 (다음 분석부터, 진입 준비 중이면 바로 다시 계산)" aria-label="레버리지">
+          <option value="1">1배</option><option value="2">2배</option><option value="3">3배</option>
+          <option value="5">5배</option><option value="10">10배</option><option value="20" selected>20배</option><option value="25">25배</option>
+          <option value="50">50배</option><option value="75">75배</option>
           <option value="100">100배</option><option value="125">125배</option>
         </select>
         <button id="analyze-btn" type="button">◆ 정밀 분석</button>
@@ -296,7 +298,7 @@
             <div id="dp-verdict" class="hidden"><span id="dp-verdict-badge">—</span><span id="dp-sizing"></span></div>
             <div id="dp-rationale"></div>
             <div id="dp-scalp" class="hidden">
-              <div class="dp-scalp-head">⚡ 스캘핑 플랜 (탭비트 20x)</div>
+              <div class="dp-scalp-head">⚡ 스캘핑 플랜 (20x)</div>
               <div class="dp-scalp-top"><span id="dp-scalp-bias" class="scalp-badge">—</span></div>
               <div id="dp-scalp-levels">
                 <div class="dp-row"><span class="dp-key">진입</span><span id="dp-scalp-entry">—</span></div>
@@ -412,9 +414,10 @@
             <option value="attack">⚔ 공격</option>
             <option value="algo">알고리즘</option>
           </select>
-          <select id="once-lev" class="lev-select" aria-label="레버리지" title="레버리지 — 이번 분석부터 적용">
-            <option value="5">5배</option><option value="10">10배</option><option value="20">20배</option><option value="25">25배</option>
-            <option value="50">50배</option><option value="75">75배</option><option value="90">90배</option>
+          <select id="once-lev" class="lev-select" aria-label="레버리지" title="레버리지 — 고른 배율로 진입·손절·청산가를 계산합니다">
+            <option value="1">1배</option><option value="2">2배</option><option value="3">3배</option>
+            <option value="5">5배</option><option value="10">10배</option><option value="20" selected>20배</option><option value="25">25배</option>
+            <option value="50">50배</option><option value="75">75배</option>
             <option value="100">100배</option><option value="125">125배</option>
           </select>
           <button id="once-run" type="button">▶ 1회 분석</button>
@@ -518,13 +521,13 @@
   <script src="lite/brain.js?v=13"></script>
   <script src="lite/script.js?v=13"></script>
   <script src="lite/paper.js"></script>
-  <script src="lite/engine.js?v=17"></script>
+  <script src="lite/engine.js?v=21"></script>
   <script src="lite/gemini.js?v=15"></script>
-  <script src="lite/shim.js?v=19"></script>
-  <script src="app.js?v=19"></script>
+  <script src="lite/shim.js?v=21"></script>
+  <script src="app.js?v=21"></script>
   <script src="stage.js"></script>
   <script src="qr.js"></script>
-  <script src="hq.js?v=20"></script>
+  <script src="hq.js?v=21"></script>
   <script src="lite/chart.js"></script>
   <script src="lite/live.js"></script>
   <script src="lite/life.js"></script>

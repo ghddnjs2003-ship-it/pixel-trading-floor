@@ -47,6 +47,8 @@
     //    판정 패널의 '🚀 모의 진입' 버튼을 눌렀을 때(pendingEntry)만 연다.
     let pendingEntry = null;
     let pendingSeq = 0;
+    // 분석이 도는 동안 배율을 바꾸면, 판정이 나온 뒤 준비된 진입 계획을 이 배율로 다시 계산한다
+    let queuedLev = null;
 
     // 한 라운드 — 전원 동시에 생각 시작, 생각 시간이 짧은 순서로 발언
     async function round(items) {
@@ -234,6 +236,10 @@
       } finally {
         emit({ type: 'run:end' });
         running = false;
+        // 분석 중에 배율을 바꿨다면 방금 준비한 진입 계획을 새 배율로 다시 계산한다
+        const q = queuedLev;
+        queuedLev = null;
+        if (q && q !== lev) retuneLev(q);
       }
     }
 
@@ -264,7 +270,46 @@
       return { ok: true, position: res.position };
     }
 
-    return { run, enterPending, getPending: () => (pendingEntry ? { ...pendingEntry } : null), isRunning: () => running };
+    // 🎚️ 배율 변경 — 판정은 그대로 두고, 대기 중인 진입 계획의 진입·손절·목표·청산가와 리스크 게이트를
+    //   새 배율로 다시 계산한다. 2026-11-20 홍원 님 요청(화면 숫자와 실제 진입이 어긋나지 않게).
+    function retuneLev(v) {
+      const L = Brain.clampLev(v);
+      if (running) { queuedLev = L; return { ok: false, code: 'RUNNING', lev: L }; }
+      if (!pendingEntry) return { ok: false, code: 'NONE', lev: L };
+      const p = pendingEntry;
+      if (p.leverage === L) return { ok: false, code: 'SAME', lev: L };
+      const lv = Brain.levels(p.side, p.entry, L);
+      const gate = Brain.riskGate({ side: p.side, lev: L, entry: lv.entry, stop: lv.stop, target: lv.target, liq: lv.liq });
+      const bal = deps.paper ? deps.paper.balance() : null;
+      const sizing = bal != null
+        ? { marginRequired: r2((bal * p.marginPct) / 100), notional: r2((bal * p.marginPct * L) / 100), notionalPctOfAccount: p.marginPct * L }
+        : null;
+      const out = {
+        type: 'levels', side: p.side, leverage: L, symbol: p.symbol, display: p.display,
+        entry: Script.fmtPrice(lv.entry), stop: Script.fmtPrice(lv.stop), target: Script.fmtPrice(lv.target),
+        liq: lv.liq, rr: gate.rr, ok: gate.ok, reasons: gate.reasons.slice(), stopBeyondLiq: gate.stopBeyondLiq, sizing,
+      };
+      if (!gate.ok) {
+        // 새 배율에서는 손절이 청산가 밖 — 계획을 접고 버튼도 내린다(다시 분석해 새로 받아야 한다)
+        pendingEntry = null;
+        log(`> 🔁 배율 ${L}배 — ${gate.reasons[0]}`);
+        emit(out);
+        emit({ type: 'entry:ready', ready: false, reason: 'LEV_GATE', message: gate.reasons[0] });
+        return { ok: false, code: 'GATE', lev: L, error: gate.reasons[0] };
+      }
+      pendingEntry = { ...p, ...lv, leverage: L, rr: gate.rr };
+      log(`> 🔁 배율 ${L}배로 다시 계산 — 진입 ${Script.fmtPrice(lv.entry)} · 손절 ${Script.fmtPrice(lv.stop)} · 청산가 ${Script.fmtPrice(lv.liq)}`);
+      emit(out);
+      emit({
+        type: 'entry:ready', ready: true, token: pendingEntry.token,
+        symbol: p.symbol, display: p.display, side: p.side, mode: p.mode,
+        entry: lv.entry, stop: lv.stop, target: lv.target, liq: lv.liq,
+        leverage: L, confidence: p.confidence, rr: gate.rr, marginPct: p.marginPct,
+      });
+      return { ok: true, code: 'RETUNED', lev: L, liq: lv.liq, rr: gate.rr };
+    }
+
+    return { run, enterPending, retuneLev, getPending: () => (pendingEntry ? { ...pendingEntry } : null), isRunning: () => running };
   }
 
   return { THINK, createBus, createEngine };

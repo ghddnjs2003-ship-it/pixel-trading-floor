@@ -41,12 +41,14 @@ body.whip-mode, body.whip-mode * { touch-action: none; }
 .ap-once-row select { font-family: inherit; font-size: 12px; background: #0c0c14; color: #fff; border: 2px solid #000; }
 #once-run { font-family: inherit; font-size: 13px; padding: 5px 10px; background: var(--gold); color: #000; border: 2px solid #000; box-shadow: 2px 2px 0 #000; cursor: pointer; white-space: nowrap; }
 #once-run:disabled { opacity: .5; cursor: wait; }
-/* 레버리지 선택 (상단 바·1회 분석 줄 공용) */
+/* 레버리지 선택 (상단 바·1회 분석 줄 공용) — 모드 버튼과 같은 높이로 한 줄에 서게 */
 .lev-select {
-  font-family: inherit; font-size: 12px; letter-spacing: 1px; padding: 0 6px;
+  font-family: inherit; font-size: 12px; letter-spacing: 1px; padding: 0 6px; height: 33px;
   background: #0a0a10; color: var(--gold); border: 2px solid #000; box-shadow: 3px 3px 0 #000; cursor: pointer;
 }
-html.m #lev-select { font-size: 9px; padding: 0 2px; letter-spacing: 0; box-shadow: 2px 2px 0 #000; }
+.lev-select:hover { color: #fff8e0; border-color: #2c2c48; }
+.lev-select:focus { outline: none; border-color: var(--gold); }
+html.m #lev-select { font-size: 9px; padding: 0 2px; letter-spacing: 0; box-shadow: 2px 2px 0 #000; height: 24px; }
 .ap-once-row .lev-select { box-shadow: none; }
 /* 레버리지 경고 */
 .ap-lev-warn { font-size: 11px; color: #ffcf6a; line-height: 1.5; margin-top: 6px; }
@@ -455,6 +457,7 @@ html.m #logo { font-size: 12px; letter-spacing: 0; flex: 1; min-width: 0; white-
 html.m #auto-chip { font-size: 10px; padding: 2px 6px; }
 html.m #clocks { display: none; }
 html.m #controls { width: 100%; gap: 4px; order: 3; }
+html.m #controls #lev-select { flex: none; }
 html.m #symbol-input { flex: 1; min-width: 0; width: auto; font-size: 12px; padding: 4px 6px; }
 /* 한 줄에 입력·모드 3개·배율·ANALYZE가 다 들어가야 한다 — 입력칸이 70px은 남게 */
 html.m #mode-toggle .mode-btn { font-size: 9px; padding: 4px 4px; letter-spacing: 0; }

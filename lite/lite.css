@@ -1,7 +1,11 @@
 /* PIXEL TRADING FLOOR 데모 버전 — 실제 버전 전용 UI 숨김 + 리본 + 차트 크기 + 무료 분석 끝 안내 (build.js가 hq.css 뒤에 붙인다) */
 #auto-chip, #auto-btn, #pt-btn, #rec-btn, #stats-btn, #replay-btn,
-#watcher-toggle, #watcher-stat, #mode-attack, #venue-board, #alerts-panel, #dp-card-btn,
-#lev-select { display: none !important; } /* 배율은 100배 고정(화면에 표시하지 않음 — 대표 요청 2026-10-07) */
+#watcher-toggle, #watcher-stat, #mode-attack, #venue-board, #alerts-panel, #dp-card-btn
+{ display: none !important; } /* 실제 버전 전용 조작 UI 숨김. 배율(#lev-select)은 2026-11-20 홍원 님 요청으로 다시 보여 준다 */
+
+/* 레버리지 선택 — 상단 컨트롤 바에서 종목 입력·모드·정밀 분석과 한 줄에 정돈되게 */
+#controls #lev-select { flex: none; }
+html.m #controls #lev-select { flex: none; max-width: 62px; }
 
 #lite-ribbon { display: flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 10px; letter-spacing: .5px; }
 #lite-ribbon .why { color: #9a9ab4; }

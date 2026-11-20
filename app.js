@@ -757,6 +757,34 @@ async function enterPendingPosition() {
   }
 }
 
+/* 🎚️ 배율을 바꿔 대기 중인 진입 계획을 다시 계산했을 때 (engine.retuneLev → levels 이벤트)
+   판정 글자는 그대로 두고, 진입·손절·목표와 리스크 게이트(청산가)만 새 배율 숫자로 바꾼다.
+   이렇게 해야 🚀 모의 진입 버튼이 여는 포지션과 화면 숫자가 어긋나지 않는다. */
+function onLevels(ev) {
+  if (!ev) return;
+  if (ev.entry) qs('#dp-entry').textContent = ev.entry;
+  if (ev.stop) qs('#dp-stop').textContent = ev.stop;
+  if (ev.target) qs('#dp-target').textContent = ev.target;
+  const scalp = qs('#dp-scalp');
+  if (scalp && !scalp.classList.contains('hidden')) {
+    if (ev.entry) qs('#dp-scalp-entry').textContent = ev.entry;
+    if (ev.stop) qs('#dp-scalp-stop').textContent = ev.stop;
+    if (ev.target) qs('#dp-scalp-target').textContent = ev.target;
+  }
+  if (lastDecision) {
+    lastDecision.entry = ev.entry || lastDecision.entry;
+    lastDecision.stop = ev.stop || lastDecision.stop;
+    lastDecision.target = ev.target || lastDecision.target;
+    lastDecision.liq = ev.liq === undefined ? lastDecision.liq : ev.liq;
+    lastDecision.leverage = ev.leverage;
+  }
+  onRisk({
+    type: 'risk', rr: ev.rr, ok: ev.ok, reasons: ev.reasons || [],
+    sizing: ev.sizing, liq: ev.liq, stopBeyondLiq: ev.stopBeyondLiq, scope: 'scalp',
+  });
+  pushLog('sys', `🎚️ 레버리지 ${ev.leverage}배 기준으로 진입·손절·목표를 다시 계산했습니다`);
+}
+
 /* --------------------------------------------------------------------------
    6. 모달 / 토스트
    -------------------------------------------------------------------------- */
@@ -899,6 +927,7 @@ function handleEvent(ev) {
     case 'scan':       onScan(ev); break;
     case 'decision':   onDecision(ev); break;
     case 'entry:ready': setEntryReady(ev); break;
+    case 'levels':    onLevels(ev); break;
     case 'ai':         onAi(ev); break;
     case 'saved':      toast('리포트 저장됨(클릭해서 열기): ' + shortPath(ev.path), 'ok', '/reports/' + encodeURIComponent(shortPath(ev.path))); break;
     case 'run:error':  toast(ev.message || '오류가 발생했습니다', 'err'); break;
