@@ -1457,10 +1457,11 @@ const HQ = (() => {
         const label = sc && sc !== 'PASS' ? sc : act;
         caption('ace', 'ACE · 최종 판정', `${label} ${conf}% — ${firstSentence(ev.rationale || ev.report, 90)}`, null);
         const sym = ev.display || S.runSym || '';
+        const where = MOBILE ? '화면 아래 🚀 모의 진입 버튼' : '판정 패널의 🚀 모의 진입 버튼';
         const reportText = act === 'BUY' || act === 'LONG'
-          ? `대표님, ${sym} 롱 진입 준비 완료! 원하실 때 판정 패널의 🚀 모의 진입 버튼을 누르세요.`
+          ? `대표님, ${sym} 롱 진입 준비 완료! 원하실 때 ${where}을 누르세요.`
           : act === 'SELL' || act === 'SHORT'
-            ? `대표님, ${sym} 숏 진입 준비 완료! 원하실 때 판정 패널의 🚀 모의 진입 버튼을 누르세요.`
+            ? `대표님, ${sym} 숏 진입 준비 완료! 원하실 때 ${where}을 누르세요.`
             : '대표님, 지금은 관망(홀딩)입니다!';
         // ✂️ 분석과 진입 분리 — 포지션은 사용자가 🚀 버튼을 눌렀을 때만 열리므로,
         //   그때 오는 position 이벤트가 '진입 보고'를 따로 남긴다(판정 보고가 그 보고를 막지 않게).
