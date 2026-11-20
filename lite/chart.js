@@ -281,6 +281,8 @@
         details: false,
         hotlist: false,
         enable_publishing: false,
+        // 위젯 툴바에서 종목 검색·비교·스크린숏·전체화면은 쓰지 않는다 — 390px 폭에서 버튼이 넘치지 않게
+        disabled_features: ['header_symbol_search', 'symbol_search_hot_key', 'header_compare', 'header_screenshot', 'header_fullscreen_button', 'header_undo_redo'],
       };
     }
 

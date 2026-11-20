@@ -43,10 +43,6 @@ html:not(.m) #chart-wrap { height: clamp(200px, 26vh, 300px); }
   color: #8a8aa4; background: rgba(8, 8, 14, .92); font-size: 11px; text-align: center;
 }
 #office-tv-note.hidden { display: none; }
-/* 휴대폰 픽셀 오피스 — 차트가 커진 만큼 화면을 세로로 이어 본다 (아래 판정 줄·모의 계좌가 잘리지 않게) */
-html.m:not(.dash-view):not(.trading-view):not(.screener-view):not(.whale-view) #app { overflow-y: auto; overflow-x: hidden; }
-html.m:not(.dash-view):not(.trading-view):not(.screener-view):not(.whale-view) #app > * { flex: none; }
-html.m:not(.dash-view):not(.trading-view):not(.screener-view):not(.whale-view) #floor { flex: none; height: 420px; }
 /* 휴대폰: 시세 한 줄 아래에 차트를 화면 폭 그대로 — 캔들이 넓게 보이게 300px */
 html.m #board { flex-wrap: wrap; row-gap: 4px; }
 html.m #board-info { display: flex; flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }

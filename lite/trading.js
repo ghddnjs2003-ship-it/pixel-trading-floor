@@ -314,14 +314,17 @@
             gridColor: 'rgba(38,49,67,.55)',
             autosize: true,
             hide_top_toolbar: false,
+            // 좁은 화면은 왼쪽 그리기 툴바·범례를 접어 캔들 폭과 높이를 살린다
             hide_side_toolbar: window.innerWidth <= 768,
-            hide_legend: false,
+            hide_legend: window.innerWidth <= 768,
             allow_symbol_change: false,
             save_image: false,
             withdateranges: true,
             details: false,
             hotlist: false,
             enable_publishing: false,
+            // 위젯 툴바에서 종목 검색·비교·스크린숏·전체화면은 쓰지 않는다 — 좁은 폭에서 버튼이 넘치지 않게
+            disabled_features: ['header_symbol_search', 'symbol_search_hot_key', 'header_compare', 'header_screenshot', 'header_fullscreen_button', 'header_undo_redo'],
           });
           const iframe = host.querySelector('iframe');
           if (iframe) iframe.addEventListener('load', hideTvNote);
