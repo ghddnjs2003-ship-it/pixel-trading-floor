@@ -105,7 +105,10 @@
       set('blitz', 'blitz'); set('guard', 'guard');
     }
     const head = ai && ai.rationale ? `✨ Gemini AI · ${ai.rationale}` : '✨ Gemini AI 판정';
-    const next = ai && ai.nextCondition ? ` · 다음 조건: ${ai.nextCondition}` : '';
+    // 관망일 때만 "다음 조건"을 붙인다 — 진입 판정에 '데이터 없음'이 붙던 것 방지
+    const nc = ai && ai.nextCondition ? ai.nextCondition.trim() : '';
+    const useful = nc && nc !== '데이터 없음' && nc !== '없음';
+    const next = ai && ai.action === 'HOLD' && useful ? ` · 다음 조건: ${nc}` : '';
     out.rationale = head + next;
     return out;
   }
