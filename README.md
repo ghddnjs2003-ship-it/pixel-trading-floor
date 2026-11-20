@@ -13,6 +13,7 @@
 - `app.js`, `hq.js`, `stage.js`, `qr.js` — 사무실 연출·UI
 - `style.css`, `hq.css` — 사무실 화면 스타일, `lite/lite.css` — 모바일·데모 레이어
 - `lite/` — 서버 없이 도는 데모 엔진(모의 매매·차트·지표, `shim.js`가 `/api/*`를 가로챕니다)
+- `lite/chart.js` — 픽셀 오피스 상단 차트는 **트레이딩뷰 공식 위젯 하나**(`BYBIT:BTCUSDT.P`). 2026-11-20 홍원 님 지시로 자체 캔버스 차트는 없앴고, 데모 트레이딩 탭(`lite/trading.js`)도 같은 위젯만 씁니다. 종목을 바꾸면 두 탭 위젯 심볼이 함께 바뀝니다
 - `lite/context.js`, `lite/reports.js` — AI 요청에 싣는 **내 책·복기·국면·일정·고래·헤드라인** 문맥 조립과 **판정 리포트 아카이브**(이 브라우저, 복사·.md 저장)
 - `lite/screener.js`, `lite/screener.css` — `[스크리너]` 탭(바이비트 무기한·현물 USDT 종목, 실시간 웹소켓 시세)
 - `lite/global.js`, `lite/global.css` — 글로벌 시황: `[사무실]`·`[트레이딩]` 탭의 상단 슬림 전광판(36px)과 `[스크리너]` 탭의 7칸 요약 카드(좁은 화면은 한 줄 요약 칩 + 접기/펼치기)
