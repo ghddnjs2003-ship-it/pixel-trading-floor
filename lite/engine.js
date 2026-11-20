@@ -43,6 +43,10 @@
       emit({ type: 'run:error', message });
     };
     let running = false;
+    // ✂️ 2026-11-20 홍원 님 요청 — 분석과 진입을 나눈다. 정밀 분석이 끝나도 모의 포지션은 열지 않고,
+    //    판정 패널의 '🚀 모의 진입' 버튼을 눌렀을 때(pendingEntry)만 연다.
+    let pendingEntry = null;
+    let pendingSeq = 0;
 
     // 한 라운드 — 전원 동시에 생각 시작, 생각 시간이 짧은 순서로 발언
     async function round(items) {
@@ -64,6 +68,9 @@
         throw err;
       }
       running = true;
+      // 새 분석이 시작되면 지난 진입 계획은 버린다 — 가격이 움직인 뒤 옛 레벨로 들어가지 않게
+      pendingEntry = null;
+      emit({ type: 'entry:ready', ready: false, reason: 'running' });
       const mode = opts.mode === 'algo' ? 'algo' : 'scalp';
       const lev = Brain.clampLev(opts.lev);
       const kiosk = !!opts.kiosk;
@@ -193,22 +200,34 @@
         emit(dec);
         log(`>>> 최종 판정: ${final.action} (${plan.confidence}%)${final.verdict ? ` · PM ${final.verdict}` : ''}`, 'stage');
 
+        // ✂️ 분석과 진입 분리 — 여기서는 '진입 준비'만 하고 포지션은 열지 않는다.
         if (final.side && kiosk) {
+          pendingEntry = null;
           log('> 소개 화면 자동 시연 — 모의 포지션은 열지 않습니다');
-        } else if (final.side && deps.paper) {
-          const res = deps.paper.open({
-            symbol: sym.symbol, display: sym.display, side: final.side, mode, entry: plan.entry, stop: plan.stop,
-            target: plan.target, liq: plan.liq, leverage: lev, confidence: plan.confidence, rr: gate.rr,
-            axis: snap.axis, marginPct: final.marginPct,
+          emit({ type: 'entry:ready', ready: false, reason: 'DEMO' });
+        } else if (final.side && gate.ok && deps.paper) {
+          pendingEntry = {
+            token: ++pendingSeq,
+            symbol: sym.symbol, display: sym.display, side: final.side, mode,
+            entry: plan.entry, stop: plan.stop, target: plan.target, liq: plan.liq,
+            leverage: lev, confidence: plan.confidence, rr: gate.rr, axis: snap.axis, marginPct: final.marginPct,
+            at: now(),
+          };
+          log('> 진입 준비 완료 — 자동으로 들어가지 않습니다. 원하시면 판정 패널의 🚀 모의 진입을 누르세요');
+          emit({
+            type: 'entry:ready', ready: true, token: pendingEntry.token,
+            symbol: sym.symbol, display: sym.display, side: final.side, mode,
+            entry: plan.entry, stop: plan.stop, target: plan.target, liq: plan.liq,
+            leverage: lev, confidence: plan.confidence, rr: gate.rr, marginPct: final.marginPct,
           });
-          if (res.position) {
-            emit({ type: 'position', action: 'open', position: res.position });
-            log(`> 가상 포지션 오픈: ${sym.display} ${final.side} ${lev}x @ ${Script.fmtPrice(plan.entry)} · 증거금 ${res.position.margin.toFixed(2)} USDT · 청산가 ${Script.fmtPrice(plan.liq)}`);
-          } else {
-            log(`> 가상 포지션 보류 — ${res.skipped}`);
-          }
-        } else if (!final.side) {
+        } else if (final.side) {
+          pendingEntry = null;
+          log(`> 진입하지 않습니다 — ${!deps.paper ? '모의 계좌를 쓸 수 없습니다' : '리스크 게이트를 통과하지 못했습니다'}`);
+          emit({ type: 'entry:ready', ready: false, reason: !deps.paper ? 'NOPAPER' : 'GATE' });
+        } else {
+          pendingEntry = null;
           log('> 관망 — 이번 판정으로는 포지션을 열지 않습니다');
+          emit({ type: 'entry:ready', ready: false, reason: 'HOLD' });
         }
       } catch (e) {
         fail(e && e.message ? e.message : String(e));
@@ -218,7 +237,34 @@
       }
     }
 
-    return { run, isRunning: () => running };
+    // 판정 패널의 '🚀 모의 진입' — 사용자가 눌렀을 때만 지금 준비된 계획으로 모의 포지션을 연다.
+    function enterPending(opts = {}) {
+      if (!pendingEntry) return { ok: false, code: 'NONE', error: '진입할 판정이 없습니다 — ◆ 정밀 분석을 먼저 눌러 주세요' };
+      if (!deps.paper) return { ok: false, code: 'NOPAPER', error: '모의 계좌를 쓸 수 없습니다' };
+      if (opts.token != null && String(opts.token) !== String(pendingEntry.token)) {
+        return { ok: false, code: 'STALE', error: '판정이 바뀌었습니다 — 다시 분석한 뒤 눌러 주세요' };
+      }
+      const p = pendingEntry;
+      const res = deps.paper.open({
+        symbol: p.symbol, display: p.display, side: p.side, mode: p.mode, entry: p.entry, stop: p.stop,
+        target: p.target, liq: p.liq, leverage: p.leverage, confidence: p.confidence, rr: p.rr,
+        axis: p.axis, marginPct: p.marginPct,
+      });
+      if (!res.position) {
+        // 이미 보유·동시 보유 한도·잔고 부족 — 한 번 쓴 계획은 버리고 화면 버튼도 내린다
+        pendingEntry = null;
+        log(`> 모의 진입 보류 — ${res.skipped}`);
+        emit({ type: 'entry:ready', ready: false, reason: 'SKIPPED', message: res.skipped });
+        return { ok: false, code: 'SKIPPED', error: res.skipped };
+      }
+      pendingEntry = null;
+      log(`> 🚀 모의 진입(직접 누름): ${p.display} ${p.side} ${p.leverage}x @ ${Script.fmtPrice(p.entry)} · 증거금 ${res.position.margin.toFixed(2)} USDT · 청산가 ${Script.fmtPrice(p.liq)}`);
+      emit({ type: 'position', action: 'open', position: res.position });
+      emit({ type: 'entry:ready', ready: false, reason: 'ENTERED' });
+      return { ok: true, position: res.position };
+    }
+
+    return { run, enterPending, getPending: () => (pendingEntry ? { ...pendingEntry } : null), isRunning: () => running };
   }
 
   return { THINK, createBus, createEngine };

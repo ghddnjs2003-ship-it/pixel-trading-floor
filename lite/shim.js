@@ -82,6 +82,12 @@
         return json(200, tape);
       }
       if (method === 'GET' && p === '/api/positions') return json(200, ctx.paper.snapshot());
+      // ✂️ 판정 패널의 '🚀 모의 진입' — 사용자가 버튼을 눌렀을 때만 엔진이 준비해 둔 계획으로 포지션을 연다
+      if (method === 'POST' && p === '/api/positions/enter') {
+        const r = ctx.engine.enterPending({ token: body && body.token });
+        if (r.ok) return json(200, { ok: true, position: r.position });
+        return json(r.code === 'SKIPPED' ? 400 : 409, { ok: false, code: r.code, error: r.error });
+      }
       if (method === 'POST' && p === '/api/positions/close') {
         const id = body && body.id;
         const pos = id ? ctx.paper.getOpen(id) : null;

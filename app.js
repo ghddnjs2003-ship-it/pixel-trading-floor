@@ -598,6 +598,7 @@ function resetDecision() {
   if (rb) rb.className = 'hidden';
   const src = qs('#dp-source');
   if (src) { src.textContent = ''; src.classList.add('hidden'); src.classList.remove('live'); }
+  setEntryReady(null);
   resetScalp();
 }
 
@@ -700,6 +701,60 @@ function onDecision(ev) {
 
   // ACE 말풍선
   typeBubble('ace', '최종 판정: ' + act, ev.report || ev.rationale || '');
+}
+
+/* ✂️ 분석과 진입 분리 (2026-11-20 홍원 님 요청)
+   ◆ 정밀 분석은 판정까지만 — 판정이 BUY/SELL이고 리스크 게이트를 통과했으면 서버(엔진)가 '진입 준비'만 해 두고
+   entry:ready 이벤트로 알려 준다. 모의 포지션은 사용자가 🚀 모의 진입 버튼을 눌렀을 때만 열린다. */
+function setEntryReady(ev) {
+  pendingEntry = ev && ev.ready ? ev : null;
+  const ready = !!pendingEntry;
+  const sideKo = pendingEntry ? (String(pendingEntry.side).toUpperCase() === 'SHORT' ? '숏' : '롱') : '';
+  const label = ready
+    ? `🚀 모의 진입 — ${pendingEntry.display || pendingEntry.symbol || ''} ${sideKo} ${pendingEntry.leverage || ''}x`
+    : '🚀 모의 진입';
+  [qs('#dp-enter-btn'), qs('#m-enter-btn')].forEach((b) => {
+    if (!b) return;
+    b.textContent = label;
+    b.disabled = !ready;
+    b.classList.remove('busy');
+    b.classList.toggle('hidden', !ready);
+  });
+  const box = qs('#dp-enter');
+  if (box) box.classList.toggle('hidden', !ready);
+  const note = qs('#dp-enter-note');
+  if (note) {
+    note.textContent = ready ? '누를 때만 모의 포지션이 열립니다 — 위 진입·손절·목표 레벨로 들어갑니다' : '';
+  }
+}
+
+async function enterPendingPosition() {
+  if (!pendingEntry) { toast('진입할 판정이 없습니다 — ◆ 정밀 분석을 먼저 눌러 주세요', 'err'); return; }
+  const btns = [qs('#dp-enter-btn'), qs('#m-enter-btn')].filter(Boolean);
+  btns.forEach((b) => { b.disabled = true; b.classList.add('busy'); });
+  const restore = () => {
+    const p = window.LITE && window.LITE.engine && window.LITE.engine.getPending ? window.LITE.engine.getPending() : null;
+    setEntryReady(p ? { ready: true, ...p } : null);
+  };
+  try {
+    const res = await fetch('/api/positions/enter', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: pendingEntry.token }),
+    });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d || !d.ok) {
+      toast((d && d.error) || '모의 진입에 실패했습니다', 'err');
+      restore();
+      return;
+    }
+    // 포지션 오픈 이벤트(SSE)가 토스트·가상 포지션 패널을 갱신한다 — 한 번 더 읽어 두면 놓쳐도 맞는다
+    setEntryReady(null);
+    loadPositions();
+  } catch (_) {
+    toast('모의 진입 요청에 실패했습니다', 'err');
+    restore();
+  }
 }
 
 /* --------------------------------------------------------------------------
@@ -843,6 +898,7 @@ function handleEvent(ev) {
     case 'position':   onPosition(ev); break;
     case 'scan':       onScan(ev); break;
     case 'decision':   onDecision(ev); break;
+    case 'entry:ready': setEntryReady(ev); break;
     case 'ai':         onAi(ev); break;
     case 'saved':      toast('리포트 저장됨(클릭해서 열기): ' + shortPath(ev.path), 'ok', '/reports/' + encodeURIComponent(shortPath(ev.path))); break;
     case 'run:error':  toast(ev.message || '오류가 발생했습니다', 'err'); break;
@@ -1058,6 +1114,7 @@ async function loadTape() {
 
 let lastDecision = null;                 // 판정 카드용 마지막 판정 이벤트
 let lastRisk = null;                     // 마지막 리스크 게이트 결과
+let pendingEntry = null;                 // ✂️ 분석 후 대기 중인 모의 진입 계획 — 🚀 버튼을 눌러야 포지션이 열린다
 let alertsState = [];                    // 최근 급변동 알림 (최신 우선)
 let alertsSeeded = false;                // 서버 최근 알림을 한 번만 시드한다
 let positionsState = { open: [], closed: [], summary: null };
@@ -2151,6 +2208,8 @@ function init() {
     analyze('algo');
   });
   qs('#symbol-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') analyze(); });
+  // ✂️ 모의 진입 버튼 (판정 패널 · 휴대폰 판정 줄) — 눌렀을 때만 포지션이 열린다
+  [qs('#dp-enter-btn'), qs('#m-enter-btn')].forEach((b) => { if (b) b.addEventListener('click', enterPendingPosition); });
 
   // 모드 토글
   const algoBtn = qs('#mode-algo');
