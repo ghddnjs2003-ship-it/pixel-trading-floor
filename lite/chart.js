@@ -1,11 +1,9 @@
-/* PIXEL TRADING FLOOR 데모 버전 — 상단 차트 (hq.js 다음에 로드, app.js의 drawChart를 대신 그린다)
-   최근 12시간 5분봉 캔들 + MA20·MA50 위에
-   · 매수▲·매도▼ 표시, 진입가→목표가 초록·진입가→손절가 빨강 구역(트레이딩뷰 포지션 도구처럼), 청산가
-   · 현재가 선 — 보유 중이면 실시간 손익(ROE·USDT)
-   · 관망이면 규칙이 보고 있는 6시간 박스와 "돌파 대기"선
-   · 끝난 거래는 익절·손절 자리에 표시
-   차트가 화면에 보일 때만 5초마다 최근 봉을 받아 이어 그린다.
-   model()까지는 순수 함수(Node 테스트), install()이 브라우저에서 그린다. */
+/* PIXEL TRADING FLOOR 데모 버전 — 픽셀 오피스 상단 차트 (hq.js 다음에 로드, app.js의 drawChart를 대신한다)
+   자체 캔버스 차트는 없앴다 — 트레이딩뷰 공식 위젯(Advanced Real-Time Chart) 하나만 띄운다.
+   2026-11-20 홍원 님 "아니 저렇게 말고 우리차트는 지우고 트레이딩뷰만 사용할거야 전부다"
+   · 종목은 분석·워치리스트 클릭·보유 포지션을 따라 바뀐다 (코인은 BYBIT 무기한, 미국 주식은 NASDAQ)
+   · 직원 잡담·주문창 현재가가 쓰는 candles()/state()는 최근 5분봉을 20초에 한 번 조용히 받아 채운다
+   model()은 남겨 둔 순수 함수(Node 테스트), install()이 브라우저에서 위젯을 띄운다. */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory(require('./brain.js'));
   else root.LiteChart = factory(root.LiteBrain);
@@ -197,455 +195,224 @@
     return out;
   }
 
-  /* ----------------------------------------------------------------- 브라우저 */
-  const COL = { bg: '#000', grid: '#161622', up: '#3fb950', down: '#f85149', gold: '#e8c84a', blue: '#4a9de8', ink: '#e8e8f0', dim: '#6a6a84', liq: '#c2362c' };
-  const TAG = {
-    target: ['#3fb950', '#04150a'], entry: ['#e8e8f0', '#101018'], stop: ['#f85149', '#1a0303'],
-    current: ['#e8c84a', '#1a1408'], wait: ['#3a300c', '#f5d76e'], liq: ['#4a0f0c', '#ffb4ab'],
+  /* ----------------------------------------------------------------- 브라우저
+     상단 차트는 트레이딩뷰 공식 위젯 하나로 그린다 (2026-11-20 홍원 님 "우리 차트는 지우고 트레이딩뷰만").
+     우리 캔버스 대신 #office-tv-chart 안에 위젯을 띄우고, 종목이 바뀌면 위젯 심볼만 따라 바꾼다.
+     직원 잡담(lite/life.js)·주문창 현재가(lite/ui.js)가 쓰는 candles()/state()는 그대로 살려 두려고
+     최근 5분봉을 20초에 한 번만 조용히 받아 둔다(그리는 데는 쓰지 않는다). */
+  const TV_STOCKS = {
+    NVDA: 'NASDAQ:NVDA', AAPL: 'NASDAQ:AAPL', MSFT: 'NASDAQ:MSFT', TSLA: 'NASDAQ:TSLA', AMZN: 'NASDAQ:AMZN',
+    GOOGL: 'NASDAQ:GOOGL', META: 'NASDAQ:META', AMD: 'NASDAQ:AMD', COIN: 'NASDAQ:COIN', MSTR: 'NASDAQ:MSTR',
+    SPY: 'AMEX:SPY', QQQ: 'NASDAQ:QQQ', TQQQ: 'NASDAQ:TQQQ',
+    SAMSUNG: 'KRX:005930', SKHYNIX: 'KRX:000660',
   };
-  const LINE = { target: [COL.up, []], entry: [COL.ink, [4, 3]], stop: [COL.down, []], wait: [COL.gold, [5, 3]] };
-  const MARK = { win: COL.up, loss: COL.down, liq: COL.liq, exit: COL.dim };
-  const FONT = '"Galmuri11", "Galmuri9", monospace';
-  const ease = (k) => 1 - Math.pow(1 - Math.min(1, Math.max(0, k)), 3);
+  const TV_INTERVAL = '5';
+  const TV_POLL_MS = 20000;
 
-  function sma(arr, n) {
-    const out = new Array(arr.length).fill(null);
-    let sum = 0;
-    for (let i = 0; i < arr.length; i++) {
-      sum += arr[i];
-      if (i >= n) sum -= arr[i - n];
-      if (i >= n - 1) out[i] = sum / n;
-    }
-    return out;
+  // 우리 종목(BTCUSDT·삼성전자…)을 트레이딩뷰 심볼로 — 코인은 바이비트 무기한, 미국 주식은 나스닥
+  function tvSymbol(symbol) {
+    const code = String(symbol || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (!code) return 'BYBIT:BTCUSDT.P';
+    if (TV_STOCKS[code]) return TV_STOCKS[code];
+    if (/^\d{6}$/.test(code)) return `KRX:${code}`;
+    return `BYBIT:${code.replace(/USDT$/, '')}USDT.P`;
   }
-  const norm = (c) => (c.o == null ? { t: c.t, o: c.c, h: c.c, l: c.c, c: c.c } : { t: c.t, o: c.o, h: c.h, l: c.l, c: c.c });
+
+  function tvNarrow(win) {
+    return (win.innerWidth || 0) <= 768;
+  }
 
   function install(win) {
     const doc = win.document;
     const LITE = win.LITE;
-    const cv = doc.querySelector('#chart');
-    if (!LITE || !cv) return null;
-    const st = { symbol: null, display: null, axis: 'perp', candles: [], price: null, plan: null, rule: null, conf: null, born: 0, flash: null, liveAt: 0 };
-    let last = model({ candles: [] });
-    let raf = 0;
-    let seen = true;
+    const host = doc.querySelector('#office-tv-chart');
+    const note = doc.querySelector('#office-tv-note');
+    if (!LITE || !host) return null;
+
+    const st = { symbol: null, display: null, axis: 'perp', candles: [], price: null, liveAt: 0 };
+    const tv = { widget: null, script: null, symbol: '', width: 0, timer: 0, noteTimer: 0 };
     let busy = false;
 
-    function current() {
-      let open = [];
-      let closed = [];
-      if (st.symbol && LITE.paper) {
-        const snap = LITE.paper.snapshot();
-        open = snap.open.filter((p) => p.symbol === st.symbol);
-        closed = snap.closed.filter((p) => p.symbol === st.symbol).slice(0, 8);
-      }
-      return model({ candles: st.candles, price: st.price, open, closed, plan: st.plan, rule: st.rule, conf: st.conf, kiosk: LITE.kiosk, now: Date.now() });
+    function showNote(text) {
+      if (!note) return;
+      note.textContent = text;
+      note.classList.remove('hidden');
     }
 
-    function text(ctx, s, x, y, color, size, align = 'left') {
-      ctx.font = `${size}px ${FONT}`;
-      ctx.textAlign = align;
-      ctx.textBaseline = 'middle';
-      ctx.fillStyle = color;
-      ctx.fillText(s, x, y);
+    function hideNote() {
+      if (note) note.classList.add('hidden');
     }
 
-    // 한 장 그리기 — 애니메이션이 남았으면 true
-    function draw() {
-      raf = 0;
-      const rect = cv.getBoundingClientRect();
-      const W = Math.max(1, Math.round(rect.width));
-      const H = Math.max(1, Math.round(rect.height));
-      const dpr = Math.min(2, win.devicePixelRatio || 1);
-      if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) {
-        cv.width = Math.round(W * dpr);
-        cv.height = Math.round(H * dpr);
-      }
-      const ctx = cv.getContext('2d');
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.fillStyle = COL.bg;
-      ctx.fillRect(0, 0, W, H);
-      const compact = W < 560 || H < 72;
-      const fs = compact ? 9 : 11;
-      const candles = st.candles;
-      const m = (last = current());
-      if (candles.length < 2) {
-        text(ctx, compact ? '▶ ANALYZE → 여기에 진입·목표·손절' : '▶ ANALYZE를 누르면 여기에 진입가·목표가·손절가가 그려집니다', W / 2, H / 2, COL.dim, fs, 'center');
-        return false;
-      }
-      const nowMs = Date.now();
-      const tagH = fs + 5;
-      const gutter = compact ? 86 : 164;
-      const P = { l: 4, r: gutter, t: 4, b: compact ? 4 : 13 };
-      const plotW = Math.max(10, W - P.l - P.r);
-      const plotH = Math.max(10, H - P.t - P.b);
-      const right = P.l + plotW;
-      // 캔들이 최소 45%는 쓰게 — 너무 먼 레벨(손절·청산이 흔하다)은 가장자리 화살표 가격표로
-      const range = fitLevels(candles, m.levels, 0.45).range;
-      const inRange = (v) => v >= range.min && v <= range.max;
-      const n = candles.length;
-      // 오른쪽에 "앞으로" 칸을 남긴다 — 방금 연 포지션의 목표·손절 상자가 캔들 한 칸 폭이 아니라 앞쪽으로 펼쳐 보이게
-      const future = compact ? Math.round(plotW * 0.12) : Math.round(Math.min(96, Math.max(52, plotW * 0.08)));
-      const step = (plotW - future) / n;
-      const t0 = candles[0].t;
-      const bm = barMs(candles);
-      const X = (i) => P.l + step * (i + 0.5);
-      const Y = (v) => P.t + (1 - (v - range.min) / (range.max - range.min)) * plotH;
-      const YC = (v) => Math.max(P.t, Math.min(P.t + plotH, Y(v)));
-      const XT = (t) => X(Math.max(0, Math.min(n - 1, Math.floor((t - t0) / bm))));
-      const px = (v) => Math.round(v) + 0.5;
-      let animating = false;
-
-      // 배경 점 격자
-      ctx.fillStyle = COL.grid;
-      for (let gx = P.l; gx < right; gx += 16) for (let gy = P.t; gy < P.t + plotH; gy += 12) ctx.fillRect(gx, gy, 1, 1);
-
-      // 구역 — 포지션 상자는 진입 자리에서 오른쪽으로 자라며 나타난다
-      const grow = ease((nowMs - st.born) / 650);
-      if (grow < 1) animating = true;
-      for (const z of m.zones) {
-        const x1 = z.from != null ? XT(z.from) - step / 2 : P.l;
-        const xEnd = z.to != null ? XT(z.to - 1) + step / 2 : right;
-        const x2 = z.kind === 'box' ? xEnd : x1 + (xEnd - x1) * grow;
-        const y1 = YC(z.hi);
-        const y2 = YC(z.lo);
-        ctx.fillStyle = z.kind === 'profit' ? 'rgba(63,185,80,.17)' : z.kind === 'loss' ? 'rgba(248,81,73,.15)' : 'rgba(232,200,74,.07)';
-        ctx.fillRect(x1, y1, Math.max(0, x2 - x1), Math.max(1, y2 - y1));
-        if (z.kind === 'box') {
-          ctx.strokeStyle = 'rgba(232,200,74,.4)';
-          ctx.setLineDash([2, 3]);
-          ctx.lineWidth = 1;
-          ctx.strokeRect(px(x1), px(y1), Math.round(x2 - x1), Math.round(y2 - y1));
-          ctx.setLineDash([]);
-        }
-      }
-
-      // 이동평균 (MA20 금색 · MA50 파랑)
-      const closes = candles.map((c) => c.c);
-      [[sma(closes, 50), COL.blue], [sma(closes, 20), COL.gold]].forEach(([series, col]) => {
-        ctx.strokeStyle = col;
-        ctx.globalAlpha = 0.85;
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        let on = false;
-        series.forEach((v, i) => {
-          if (v == null) return;
-          if (on) ctx.lineTo(X(i), Y(v));
-          else { ctx.moveTo(X(i), Y(v)); on = true; }
-        });
-        ctx.stroke();
-        ctx.globalAlpha = 1;
+    function loadScript() {
+      if (win.TradingView && typeof win.TradingView.widget === 'function') return Promise.resolve();
+      if (tv.script) return tv.script;
+      tv.script = new Promise((resolve, reject) => {
+        const script = doc.createElement('script');
+        script.src = 'https://s3.tradingview.com/tv.js';
+        script.async = true;
+        script.onload = () => (win.TradingView && typeof win.TradingView.widget === 'function'
+          ? resolve()
+          : reject(new Error('TradingView 위젯을 읽지 못했습니다.')));
+        script.onerror = () => { tv.script = null; reject(new Error('TradingView 스크립트를 불러오지 못했습니다.')); };
+        doc.head.appendChild(script);
       });
+      return tv.script;
+    }
 
-      // 캔들
-      const bw = Math.max(1, Math.floor(step * 0.62));
-      candles.forEach((c, i) => {
-        const x = Math.round(X(i));
-        const up = c.c >= c.o;
-        ctx.fillStyle = up ? COL.up : COL.down;
-        const yh = Y(c.h);
-        ctx.fillRect(x, Math.round(yh), 1, Math.max(1, Math.round(Y(c.l) - yh)));
-        const yo = Y(c.o);
-        const yc = Y(c.c);
-        ctx.fillRect(x - Math.floor(bw / 2), Math.round(Math.min(yo, yc)), bw, Math.max(1, Math.round(Math.abs(yc - yo))));
-      });
-
-      // 끝난 거래: 진입 → 청산 점선
-      for (const lk of m.links) {
-        ctx.strokeStyle = lk.tone === 'up' ? 'rgba(63,185,80,.75)' : 'rgba(248,81,73,.75)';
-        ctx.setLineDash([2, 2]);
-        ctx.beginPath();
-        ctx.moveTo(XT(lk.from.t), YC(lk.from.price));
-        ctx.lineTo(XT(lk.to.t), YC(lk.to.price));
-        ctx.stroke();
-        ctx.setLineDash([]);
-      }
-
-      // 레벨 선 (목표·진입·손절·돌파 대기) — 가격표 칸까지 이어진다
-      for (const ln of m.lines) {
-        if (!LINE[ln.kind] || !inRange(ln.price)) continue;
-        const [col, dash] = LINE[ln.kind];
-        const y = px(Y(ln.price));
-        ctx.strokeStyle = col;
-        ctx.setLineDash(dash);
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(ln.from != null ? XT(ln.from) - step / 2 : P.l, y);
-        ctx.lineTo(right + 5, y);
-        ctx.stroke();
-        ctx.setLineDash([]);
-      }
-      const liqIn = !!m.liq && inRange(m.liq.price);
-      if (liqIn) {
-        const y = px(Y(m.liq.price));
-        ctx.strokeStyle = COL.liq;
-        ctx.setLineDash([1, 3]);
-        ctx.beginPath();
-        ctx.moveTo(m.zones.length ? XT(m.zones[0].from) - step / 2 : P.l, y);
-        ctx.lineTo(right + 5, y);
-        ctx.stroke();
-        ctx.setLineDash([]);
-      }
-
-      // 현재가 선 + 마지막 봉 점
-      const cur = m.tags.find((t) => t.kind === 'current');
-      const curCol = cur.tone === 'up' ? COL.up : cur.tone === 'down' ? COL.down : COL.gold;
-      const yc = px(Y(cur.price));
-      ctx.strokeStyle = curCol;
-      ctx.setLineDash([2, 2]);
-      ctx.beginPath();
-      ctx.moveTo(P.l, yc);
-      ctx.lineTo(right + 5, yc);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = curCol;
-      ctx.fillRect(Math.round(X(n - 1)) - 2, Math.round(yc) - 2, 5, 5);
-
-      // 매수▲ 매도▼ · 익절·손절 표시
-      for (const mk of m.markers) {
-        const x = Math.round(XT(mk.t));
-        const y = YC(mk.price);
-        if (mk.kind === 'buy' || mk.kind === 'sell') {
-          const buy = mk.kind === 'buy';
-          const d = buy ? 1 : -1;
-          ctx.fillStyle = buy ? COL.up : COL.down;
-          ctx.strokeStyle = '#000';
-          ctx.beginPath();
-          ctx.moveTo(x, y + d * 3);
-          ctx.lineTo(x - 5, y + d * 10);
-          ctx.lineTo(x + 5, y + d * 10);
-          ctx.closePath();
-          ctx.fill();
-          ctx.stroke();
-          if (mk.label) {
-            const ly = Math.max(P.t + fs / 2, Math.min(P.t + plotH - fs / 2, y + d * (12 + fs / 2)));
-            ctx.font = `${fs}px ${FONT}`;
-            const w = ctx.measureText(mk.label).width + 6;
-            ctx.fillStyle = buy ? COL.up : COL.down;
-            ctx.fillRect(Math.round(x - w / 2), Math.round(ly - fs / 2 - 2), Math.round(w), fs + 4);
-            text(ctx, mk.label, x, ly + 0.5, buy ? '#04150a' : '#fff', fs, 'center');
-          }
-        } else {
-          const col = MARK[mk.kind] || COL.dim;
-          ctx.fillStyle = col;
-          ctx.strokeStyle = '#000';
-          ctx.fillRect(x - 3, Math.round(y) - 3, 7, 7);
-          ctx.strokeRect(x - 3.5, Math.round(y) - 3.5, 8, 8);
-          if (mk.label) {
-            ctx.font = `${fs}px ${FONT}`;
-            const w = ctx.measureText(mk.label).width + 6;
-            const lx = Math.min(right - w / 2 - 2, Math.max(P.l + w / 2, x));
-            const ly = Math.max(P.t + fs / 2 + 1, y - fs - 4);
-            ctx.fillStyle = 'rgba(0,0,0,.75)';
-            ctx.fillRect(Math.round(lx - w / 2), Math.round(ly - fs / 2 - 2), Math.round(w), fs + 4);
-            text(ctx, mk.label, lx, ly + 0.5, col === COL.dim ? COL.ink : col, fs, 'center');
-          }
-        }
-      }
-
-      // 오른쪽 가격표 — 겹치면 밀어내고 원래 높이로 짧은 연결선, 범위 밖 레벨은 위·아래 끝에 화살표로
-      const edgeTag = (t) => {
-        if (inRange(t.price)) return { ...t, y: Y(t.price), h: tagH };
-        const up = t.price > range.max;
-        return { ...t, text: `${up ? '↑' : '↓'} ${t.text}`, y: up ? P.t + tagH / 2 : P.t + plotH - tagH / 2, h: tagH };
+    function tvOptions(symbol) {
+      return {
+        container_id: 'office-tv-chart',
+        symbol,
+        interval: TV_INTERVAL,
+        theme: 'dark',
+        style: '1',
+        locale: 'kr',
+        timezone: 'Asia/Seoul',
+        toolbar_bg: '#0b0b13',
+        backgroundColor: '#08080e',
+        gridColor: 'rgba(38,42,58,.5)',
+        autosize: true,
+        hide_top_toolbar: false,
+        hide_side_toolbar: tvNarrow(win),
+        hide_legend: true,
+        allow_symbol_change: false,
+        save_image: false,
+        withdateranges: true,
+        details: false,
+        hotlist: false,
+        enable_publishing: false,
       };
-      const tags = m.tags.map(edgeTag);
-      if (m.liq) tags.push(edgeTag({ kind: 'liq', price: m.liq.price, text: `청산 ${fmt(m.liq.price)}`, sub: '' }));
-      const laid = layoutTags(tags, 1, H - 1);
-      const tx = right + 7;
-      const tw = gutter - 10;
-      for (const t of laid) {
-        const [bg, fg] = t.kind === 'current' && t.tone ? [t.tone === 'up' ? COL.up : COL.down, t.tone === 'up' ? '#04150a' : '#fff'] : TAG[t.kind];
-        const y0 = Y(t.price);
-        if (Math.abs(y0 - t.y) > 2 && y0 >= P.t && y0 <= P.t + plotH) {
-          ctx.strokeStyle = bg;
-          ctx.beginPath();
-          ctx.moveTo(right + 5, px(y0));
-          ctx.lineTo(tx, px(t.y));
-          ctx.stroke();
-        }
-        ctx.fillStyle = bg;
-        ctx.fillRect(tx, Math.round(t.y - t.h / 2), tw, t.h);
-        if (t.kind === 'wait') {
-          ctx.strokeStyle = COL.gold;
-          ctx.strokeRect(tx + 0.5, Math.round(t.y - t.h / 2) + 0.5, tw - 1, t.h - 1);
-        }
-        text(ctx, t.text, tx + 4, t.y + 0.5, fg, fs);
-        if (!compact && t.sub) text(ctx, t.sub, tx + tw - 4, t.y + 0.5, fg, fs, 'right');
-      }
+    }
 
-      // 아래: 시각 + 범례
-      if (!compact) {
-        const hm = (t) => {
-          const d = new Date(t);
-          return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-        };
-        [Math.floor(n * 0.25), Math.floor(n * 0.5), Math.floor(n * 0.75), n - 1].forEach((i) => text(ctx, hm(candles[i].t), X(i), H - 6, '#5a5a72', 9, 'center'));
-        text(ctx, 'MA20', P.l + 2, H - 6, COL.gold, 9);
-        text(ctx, 'MA50', P.l + 34, H - 6, COL.blue, 9);
-        text(ctx, '5분봉', P.l + 66, H - 6, '#5a5a72', 9);
-      }
-
-      // 왼쪽 위 상태판 — 보유 중이면 실시간 손익 (좁은 화면은 손익 또는 첫 마디만)
-      if (m.hud) {
-        ctx.font = `${fs}px ${FONT}`;
-        const head = compact ? (m.hud.pnl ? '' : m.hud.text.split(' · ')[0]) : m.hud.text;
-        const w1 = head ? ctx.measureText(head).width : 0;
-        const w2 = m.hud.pnl ? ctx.measureText(m.hud.pnl.text).width + (head ? 10 : 0) : 0;
-        const w = Math.min(plotW - 4, w1 + w2 + 10);
-        ctx.fillStyle = 'rgba(0,0,0,.78)';
-        ctx.fillRect(P.l + 2, P.t + 1, w, tagH + 2);
-        ctx.strokeStyle = '#2a2a3a';
-        ctx.strokeRect(P.l + 2.5, P.t + 1.5, w - 1, tagH + 1);
-        if (head) text(ctx, head, P.l + 7, P.t + 2 + tagH / 2, COL.ink, fs);
-        if (m.hud.pnl) text(ctx, m.hud.pnl.text, P.l + 7 + w1 + (head ? 10 : 0), P.t + 2 + tagH / 2, m.hud.pnl.tone === 'down' ? COL.down : COL.up, fs);
-      }
-
-      // 방금 끝난 거래 — 화면이 번쩍이며 결과 한 줄
-      if (st.flash) {
-        const k = (nowMs - st.flash.at) / 2600;
-        if (k >= 1) st.flash = null;
-        else {
-          animating = true;
-          const a = 1 - k;
-          const win_ = st.flash.kind === 'win';
-          ctx.fillStyle = win_ ? `rgba(63,185,80,${0.3 * a})` : `rgba(248,81,73,${0.3 * a})`;
-          ctx.fillRect(0, 0, W, H);
-          const size = compact ? 14 : 22;
-          const cx = P.l + plotW / 2;
-          const cy = H / 2 - (1 - a) * 8;
-          ctx.globalAlpha = Math.min(1, a * 1.6);
-          text(ctx, st.flash.text, cx + 2, cy + 2, '#000', size, 'center');
-          text(ctx, st.flash.text, cx, cy, win_ ? '#9dffb4' : '#ffb0aa', size, 'center');
-          ctx.globalAlpha = 1;
-        }
-      }
-      return animating;
+    // 칸이 화면에 보일 때만 만든다 — 숨은 칸에서 만들면 폭이 0이라 찌그러진다
+    function mount() {
+      if (!host.clientWidth) return;
+      const symbol = tvSymbol(st.symbol);
+      if (tv.widget && tv.symbol === symbol && tv.width) return;
+      tv.symbol = symbol;
+      tv.width = host.clientWidth;
+      showNote('트레이딩뷰 차트를 불러오는 중…');
+      loadScript().then(() => {
+        if (tvSymbol(st.symbol) !== symbol) return;
+        win.requestAnimationFrame(() => {
+          if (!host.clientWidth) return;
+          host.innerHTML = '';
+          try {
+            tv.widget = new win.TradingView.widget(tvOptions(symbol));
+            const iframe = host.querySelector('iframe');
+            if (iframe) iframe.addEventListener('load', hideNote);
+            if (tv.noteTimer) win.clearTimeout(tv.noteTimer);
+            tv.noteTimer = win.setTimeout(hideNote, 8000);
+          } catch (error) {
+            showNote('트레이딩뷰 위젯을 띄우지 못했어요. 새로고침 후 다시 시도해 주세요.');
+          }
+        });
+      }).catch(() => {
+        showNote('트레이딩뷰 위젯을 불러오지 못했어요. 인터넷 연결이나 광고 차단 설정을 확인해 주세요.');
+      });
     }
 
     function render() {
-      if (raf) return;
-      raf = win.requestAnimationFrame(() => {
-        if (draw()) render();
-      });
+      mount();
     }
 
-    function setMarket(symbol, display, axis, candles, price) {
-      st.symbol = symbol;
-      st.display = display;
-      st.axis = axis || 'perp';
-      st.candles = mergeCandles(candles.map(norm), [], BARS);
-      st.price = Number.isFinite(price) ? price : null;
-      st.liveAt = 0;
-    }
-
-    LITE.bus.subscribe((ev) => {
-      if (!ev || !ev.type) return;
-      if (ev.type === 'market' && Array.isArray(ev.candles) && ev.candles.length) {
-        setMarket(ev.symbol || null, ev.display || null, ev.axis, ev.candles, null);
-        st.plan = null;
-        st.rule = null;
-        st.conf = null;
-        st.flash = null;
-        render();
-      } else if (ev.type === 'decision') {
-        st.plan = ev.plan || null;
-        st.rule = ev.rule || null;
-        st.conf = Number.isFinite(ev.confidence) ? ev.confidence : null;
-        st.born = Date.now();
-        render();
-      } else if (ev.type === 'position' && ev.position && ev.position.symbol === st.symbol) {
-        if (ev.action === 'open') {
-          st.plan = null;
-          st.born = Date.now();
-        } else if (ev.action === 'close') {
-          const p = ev.position;
-          const [, word] = EXIT[p.closeReason] || ['exit', '정리'];
-          st.flash = { kind: p.realizedAmt > 0 ? 'win' : 'loss', text: `${word}! ${signed(p.realizedAmt, 2)} USDT`, at: Date.now() };
-        }
-        render();
-      }
-    });
-
-    // 웹소켓 틱(live.js) — 진행 중인 봉과 현재가를 바로 갱신. 받고 있는 동안은 아래 5초 폴링이 쉰다.
-    function tickChart(tk) {
-      if (!tk || tk.symbol !== st.symbol || st.axis === 'spot' || !st.candles.length) return false;
-      st.candles = applyTick(st.candles, { t: tk.t, price: tk.c, high: tk.h, low: tk.l, open: tk.o });
-      st.price = tk.c;
-      st.liveAt = Date.now();
-      const pEl = doc.querySelector('#board-price');
-      if (pEl) pEl.textContent = `$${fmt(st.price)}`;
-      render();
-      return true;
-    }
-
-    // 실시간 — 화면에 보이고 탭이 앞에 있을 때만 5초마다 (웹소켓이 살아 있으면 쉰다)
+    // 화면에 보이는 동안에만 최근 5분봉을 받아 둔다 (잡담·주문창 현재가용, 20초 간격)
     async function poll() {
-      if (!st.symbol || busy || doc.hidden || !seen) return;
-      if (Date.now() - st.liveAt < 12000) return;
+      if (!st.symbol || busy || doc.hidden || !isSeen()) return;
+      if (Date.now() - st.liveAt < TV_POLL_MS - 2000) return;
       busy = true;
-      const sym = st.symbol;
+      const symbol = st.symbol;
       try {
-        const rows = await LITE.data.fetchRecentCandles(sym, { axis: st.axis, limit: barsToFetch(st.candles, Date.now()) });
-        if (sym === st.symbol && rows && rows.length) {
-          st.candles = mergeCandles(st.candles, rows.map(norm), BARS);
+        const rows = await LITE.data.fetchRecentCandles(symbol, { axis: st.axis, limit: 144 });
+        if (symbol === st.symbol && rows && rows.length) {
+          st.candles = rows.map(normRow).slice(-144);
           st.price = rows[rows.length - 1].c;
-          // 전광판 큰 가격도 차트 현재가와 같이 — 분석 때 가격에 멈춰 있으면 두 "현재가"가 달라 보인다
-          const pEl = doc.querySelector('#board-price');
-          if (pEl) pEl.textContent = `$${fmt(st.price)}`;
-          render();
+          st.liveAt = Date.now();
         }
-      } catch (_) { /* 잠깐 끊기면 다음 차례에 */ } finally {
+      } catch (_) {
+        // 잠깐 끊기면 다음 차례에
+      } finally {
         busy = false;
       }
     }
-    if (typeof win.IntersectionObserver === 'function') {
-      new win.IntersectionObserver((es) => {
-        seen = es.some((e) => e.isIntersecting);
-        if (seen) poll();
-      }).observe(cv);
-    }
-    if (typeof win.ResizeObserver === 'function') new win.ResizeObserver(render).observe(cv);
-    doc.addEventListener('visibilitychange', () => { if (!doc.hidden) poll(); });
-    win.setInterval(poll, 5000);
-    if (doc.fonts && doc.fonts.ready) doc.fonts.ready.then(render);
 
-    // 다시 들어왔을 때 보유 중인 포지션이 있으면 그 종목 차트부터 — 분석 없이도 손익이 움직이게
-    async function restore() {
+    function normRow(c) {
+      return { t: c.t, o: c.o, h: c.h, l: c.l, c: c.c };
+    }
+
+    // 정밀 분석·워치리스트 클릭이 보내는 시장 이벤트 — 종목이 바뀌면 위젯도 그 종목으로
+    LITE.bus.subscribe((ev) => {
+      if (!ev || ev.type !== 'market') return;
+      st.symbol = ev.symbol || null;
+      st.display = ev.display || ev.symbol || null;
+      st.axis = ev.axis || 'perp';
+      const last = Array.isArray(ev.candles) ? ev.candles[ev.candles.length - 1] : null;
+      if (last && Number.isFinite(last.c)) {
+        st.price = last.c;
+        st.candles = ev.candles.slice(-144).map(normRow);
+        st.liveAt = Date.now();
+      }
+      render();
+    });
+
+    // 웹소켓 틱(lite/live.js) — 현재가만 받아 전광판에 바로 반영한다
+    function applyTick(tk) {
+      if (!tk || tk.symbol !== st.symbol || !Number.isFinite(tk.c)) return false;
+      st.price = tk.c;
+      st.liveAt = Date.now();
+      const priceEl = doc.querySelector('#board-price');
+      if (priceEl) priceEl.textContent = `$${fmt(st.price)}`;
+      return true;
+    }
+
+    // 사무실 탭이 보이고 있나 — 다른 탭(대시보드·트레이딩·고래·스크리너)에서는 시세를 받지 않는다
+    function isSeen() {
+      const cls = doc.documentElement.classList;
+      return !cls.contains('dash-view') && !cls.contains('trading-view')
+        && !cls.contains('screener-view') && !cls.contains('whale-view');
+    }
+
+    // 열자마자 보유 종목이 있으면 그 종목 차트부터 (없으면 트레이딩뷰 기본 BTC)
+    function restore() {
       if (LITE.kiosk || st.symbol || !LITE.paper) return;
       const open = LITE.paper.snapshot().open;
       if (!open.length) return;
       const p = open[0];
-      try {
-        const rows = await LITE.data.fetchRecentCandles(p.symbol, { axis: p.axis, limit: BARS });
-        if (st.symbol || !rows || !rows.length) return;
-        setMarket(p.symbol, p.display, p.axis, rows, rows[rows.length - 1].c);
-        const sEl = doc.querySelector('#board-symbol');
-        const pEl = doc.querySelector('#board-price');
-        if (sEl && sEl.textContent.trim() === '—') sEl.textContent = p.display;
-        if (pEl && pEl.textContent.trim() === '—') pEl.textContent = `$${fmt(st.price)}`;
-        render();
-      } catch (_) { /* 시세를 못 받으면 분석할 때 그린다 */ }
+      if (st.symbol) return;
+      st.symbol = p.symbol;
+      st.display = p.display || p.symbol;
+      st.axis = p.axis || 'perp';
+      render();
     }
-    win.setTimeout(restore, 800);
 
-    win.drawChart = render; // app.js가 시세 수신·창 크기 변경 때 부르는 함수를 이쪽으로
-    render();
+    if (typeof win.ResizeObserver === 'function') {
+      new win.ResizeObserver(() => {
+        // 다른 탭에 가려져 있다가 다시 보이면 그때 위젯을 만든다
+        if (host.clientWidth && (!tv.widget || !tv.width)) mount();
+      }).observe(host);
+    }
+    doc.addEventListener('visibilitychange', () => { if (!doc.hidden) poll(); });
+    win.setInterval(poll, 5000);
+    win.setTimeout(restore, 900);
+    win.setTimeout(() => { render(); poll(); }, 1200);
+
     const api = {
       render,
       poll,
-      model: () => last,
-      applyTick: tickChart,
-      isSeen: () => seen,
+      model: () => ({ levels: [], zones: [], lines: [], links: [], markers: [], tags: [], liq: null, hud: null }),
+      applyTick,
+      isSeen,
       state: () => ({ symbol: st.symbol, display: st.display, axis: st.axis, bars: st.candles.length, price: st.price, liveAt: st.liveAt, lastT: st.candles.length ? st.candles[st.candles.length - 1].t : null }),
       candles: () => st.candles.slice(),
-      tags: () => last.tags.map((t) => t.text),
+      tags: () => [],
     };
+    win.drawChart = render; // app.js가 시세 수신·창 크기 변경 때 부르는 함수를 이쪽으로
     LITE.chart = api;
+    render();
     return api;
   }
 
   if (typeof window !== 'undefined' && window.document && window.LITE && !window.LITE_NO_BOOT) install(window);
 
-  return { BARS, mergeCandles, applyTick, barsToFetch, priceRange, fitLevels, layoutTags, model, install };
+  return { BARS, mergeCandles, applyTick, barsToFetch, priceRange, fitLevels, layoutTags, model, tvSymbol, install };
 });

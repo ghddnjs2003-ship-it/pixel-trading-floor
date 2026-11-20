@@ -253,7 +253,6 @@ function typeBubble(id, text, report) {
 /* --------------------------------------------------------------------------
    4. 전광판 + 차트
    -------------------------------------------------------------------------- */
-let lastCandles = null; // 리사이즈 재렌더용
 
 function updateBoard(ev) {
   qs('#board-symbol').textContent = ev.display || ev.symbol || '—';
@@ -264,8 +263,6 @@ function updateBoard(ev) {
   const chEl = qs('#board-change');
   chEl.textContent = p.change || '';
   chEl.className = (p.pct == null) ? '' : (p.pct >= 0 ? 'up' : 'down');
-  lastCandles = ev.candles || null;
-  drawChart(ev.candles);
   updateMarketBadge(ev);
   // 콘솔 상단에 수집 완료를 알리는 합성 로그 (서버가 log 이벤트를 안 보내는 구버전 대비)
   if (!serverLogs && !ev.preview) {
@@ -279,115 +276,6 @@ function updateBoard(ev) {
     boardSymbol = sym;
     loadVenueBoard();
   }
-}
-
-// 단순이동평균 — 서버를 건드리지 않고 프론트에서 계산한다(구간 부족 구간은 null)
-function sma(arr, n) {
-  const out = new Array(arr.length).fill(null);
-  let sum = 0;
-  for (let i = 0; i < arr.length; i++) {
-    sum += arr[i];
-    if (i >= n) sum -= arr[i - n];
-    if (i >= n - 1) out[i] = sum / n;
-  }
-  return out;
-}
-
-function drawChart(candles) {
-  const cv = qs('#chart');
-  const rect = cv.getBoundingClientRect();
-  cv.width = Math.max(1, Math.round(rect.width));
-  cv.height = Math.max(1, Math.round(rect.height));
-  const ctx = cv.getContext('2d');
-  ctx.fillStyle = '#000';
-  ctx.fillRect(0, 0, cv.width, cv.height);
-  if (!candles || candles.length < 2) return;
-
-  const closes = candles.map((c) => c.c);
-  const ma20 = sma(closes, 20);
-  const ma50 = sma(closes, 50);
-  // 최근 20봉 고·저 — 점선 수평 레벨로 그린다
-  const recent = closes.slice(-20);
-  const hi20 = Math.max(...recent);
-  const lo20 = Math.min(...recent);
-
-  const pool = closes.concat(
-    ma20.filter((v) => v != null),
-    ma50.filter((v) => v != null),
-    [hi20, lo20]
-  );
-  const min = Math.min(...pool);
-  const max = Math.max(...pool);
-  const pad = 6;
-  const w = cv.width - pad * 2;
-  const h = cv.height - pad * 2;
-  const up = closes[closes.length - 1] >= closes[0];
-  const color = up ? '#3fb950' : '#f85149';
-  const X = (i) => pad + (i / (closes.length - 1)) * w;
-  const Y = (v) => pad + (1 - (v - min) / ((max - min) || 1)) * h;
-
-  // 배경 픽셀 그리드 점
-  ctx.fillStyle = '#161622';
-  for (let gx = pad; gx < cv.width - pad; gx += 16) {
-    for (let gy = pad; gy < cv.height - pad; gy += 12) ctx.fillRect(gx, gy, 1, 1);
-  }
-
-  // 20봉 고·저 점선 레벨
-  ctx.setLineDash([3, 3]);
-  ctx.lineWidth = 1;
-  [[hi20, '#4d4d5e'], [lo20, '#4d4d5e']].forEach(([v, c]) => {
-    ctx.strokeStyle = c;
-    ctx.beginPath();
-    ctx.moveTo(pad, Y(v));
-    ctx.lineTo(cv.width - pad, Y(v));
-    ctx.stroke();
-  });
-  ctx.setLineDash([]);
-
-  // 이동평균선 (MA20 금색 / MA50 파랑)
-  const line = (series, c, lw) => {
-    ctx.strokeStyle = c;
-    ctx.lineWidth = lw;
-    ctx.beginPath();
-    let started = false;
-    series.forEach((v, i) => {
-      if (v == null) return;
-      const px = X(i), py = Y(v);
-      started ? ctx.lineTo(px, py) : (ctx.moveTo(px, py), (started = true));
-    });
-    ctx.stroke();
-  };
-  line(ma50, '#4a9de8', 1);
-  line(ma20, '#e8c84a', 1);
-
-  // 종가 라인
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  closes.forEach((v, i) => { const px = X(i), py = Y(v); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
-  ctx.stroke();
-
-  // 마지막 값 점
-  const lx = X(closes.length - 1), ly = Y(closes[closes.length - 1]);
-  ctx.fillStyle = color;
-  ctx.fillRect(Math.round(lx) - 3, Math.round(ly) - 3, 6, 6);
-
-  // 하단 날짜 라벨 (처음·중간·끝)
-  ctx.fillStyle = '#5a5a72';
-  ctx.font = '9px monospace';
-  const label = (i, align) => {
-    const t = candles[i] && candles[i].t;
-    if (!t) return;
-    const d = new Date(t);
-    if (Number.isNaN(d.getTime())) return;
-    const s = `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
-    ctx.textAlign = align;
-    ctx.fillText(s, X(i), cv.height - 2);
-  };
-  label(0, 'left');
-  label(Math.floor((closes.length - 1) / 2), 'center');
-  label(closes.length - 1, 'right');
-  ctx.textAlign = 'left';
 }
 
 // MARKET OPEN/CLOSED 배지 — 통화 기호와 종목 종류로 장 시간을 근사한다(공휴일 무시).
@@ -2262,7 +2150,6 @@ function init() {
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
 
   // 차트 리사이즈 대응 (마지막 candles 재렌더)
-  window.addEventListener('resize', () => { if (lastCandles) drawChart(lastCandles); });
 
   // 에이전트 콘솔 + 벽면 이퀄라이저
   initConsole();

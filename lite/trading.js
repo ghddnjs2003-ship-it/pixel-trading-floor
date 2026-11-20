@@ -8,22 +8,6 @@
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const COINS = ['BTC', 'ETH', 'SOL', 'XRP', 'DOGE'];
   const DECISION_KEY = 'pixel-lite-latest-decision-v1';
-  const FRAMES = [
-    { key: '1m', api: '1', ms: 60000, label: '1분' },
-    { key: '3m', api: '3', ms: 180000, label: '3분' },
-    { key: '5m', api: '5', ms: 300000, label: '5분' },
-    { key: '15m', api: '15', ms: 900000, label: '15분' },
-    { key: '30m', api: '30', ms: 1800000, label: '30분' },
-    { key: '1H', api: '60', ms: 3600000, label: '1시간' },
-    { key: '4H', api: '240', ms: 14400000, label: '4시간' },
-    { key: '1D', api: 'D', ms: 86400000, label: '1일' },
-    { key: '1W', api: 'W', ms: 604800000, label: '1주' },
-  ];
-  const OPTIONS = [
-    ['ma20', 'MA20'], ['ma50', 'MA50'], ['ema20', 'EMA20'],
-    ['bb', '볼린저'], ['volume', '거래량'], ['rsi', 'RSI'],
-  ];
-  const CHART_SOURCE_KEY = 'pixel-lite-chart-source-v1';
   const fmt = (n, digits = 2) => Number.isFinite(Number(n))
     ? Number(n).toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })
     : '—';
@@ -34,17 +18,13 @@
   const signed = (n, digits = 2) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${fmt(Math.abs(n), digits)}`;
   const safe = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const tickerUrl = window.LiteLive.URL_TICKER;
-  const candleUrl = window.LiteLive.URL_KLINE;
   // 기본 첫 화면 — 시장 대시보드. 다만 소개 페이지 속 임베드(?shell=1·?kiosk=1)는 종전대로 사무실이 먼저다.
   const DEFAULT_VIEW = (new URLSearchParams(location.search).get('shell') === '1' || LITE.kiosk) ? 'office' : 'dash';
 
   const state = {
-    view: DEFAULT_VIEW, symbol: 'BTCUSDT', frame: FRAMES[3], candles: [], price: null, change: null,
+    view: DEFAULT_VIEW, symbol: 'BTCUSDT', price: null, change: null,
     feed: null, requestSeq: 0, loadTimer: 0, markTimer: 0, accountTimer: 0, pending: [], tab: 'positions',
-    marginMode: 'ISOLATED', indicators: new Set(['ma20', 'ma50', 'volume']),
-    chart: { visibleCount: 100, rightTime: null, drag: null, loadingOlder: false, exhausted: false },
-    book: { bids: new Map(), asks: new Map() }, orderSide: 'LONG', latestDecision: null, mobileView: 'chart',
-    chartSource: readChartSource(),
+    marginMode: 'ISOLATED', book: { bids: new Map(), asks: new Map() }, orderSide: 'LONG', latestDecision: null, mobileView: 'chart',
   };
 
   const topbar = $('#topbar');
@@ -84,15 +64,12 @@
     <div class="trade-layout">
       <main class="trade-main">
         <section class="trade-chart-panel">
-          <div class="trade-chart-toolbar">
-            <div class="trade-toolbar-main">
-              <div class="trade-chart-src" id="trade-chart-src" role="group" aria-label="차트 종류"><button type="button" data-csrc="lite" class="active" aria-pressed="true">📊 우리 차트</button><button type="button" data-csrc="tv" aria-pressed="false">📈 트레이딩뷰</button></div>
-              <div class="trade-frame-tabs" id="trade-frames">${FRAMES.map((f) => `<button type="button" data-frame="${f.key}" class="${f.key === state.frame.key ? 'active' : ''}">${f.label}</button>`).join('')}</div>
+          <div class="trade-chart-wrap">
+            <div class="trade-tv">
+              <div id="trade-tv-chart"></div>
+              <div id="trade-tv-note" role="status">트레이딩뷰 차트를 불러오는 중…</div>
             </div>
-            <div class="trade-indicators" id="trade-indicators">${OPTIONS.map(([key, label]) => `<label><input type="checkbox" data-indicator="${key}"${state.indicators.has(key) ? ' checked' : ''}>${label}</label>`).join('')}</div>
           </div>
-          <div class="trade-chart-wrap"><canvas id="trade-chart" aria-label="실시간 캔들 차트"></canvas><div id="trade-chart-message" role="status">Bybit 캔들을 불러오는 중…</div><span id="trade-history-status" role="status" aria-live="polite"></span><button id="trade-latest" type="button" class="hidden">최신으로</button><div id="trade-tv" class="trade-tv"><div id="trade-tv-chart"></div><div id="trade-tv-note" role="status">트레이딩뷰 차트를 불러오는 중…</div></div></div>
-          <div id="trade-rsi-wrap" class="trade-rsi-wrap hidden"><span>RSI(14)</span><canvas id="trade-rsi" aria-label="RSI 14 보조지표"></canvas></div>
         </section>
         <section class="trade-orders-panel">
           <div class="trade-subtabs" id="trade-subtabs"><button type="button" data-tab="positions" class="active">열린 포지션 <span id="trade-open-count">0</span></button><button type="button" data-tab="fills">체결 내역</button></div>
@@ -128,8 +105,6 @@
     </div>
     <footer class="trade-account-footer"><span>모의 계좌</span><span>잔고 <b id="trade-footer-balance">—</b> USDT</span><span>평가 자산 <b id="trade-footer-equity">—</b> USDT</span><span>미실현 손익 <b id="trade-footer-pnl">—</b> USDT</span><span>사용 가능 <b id="trade-footer-available">—</b> USDT</span></footer>`;
   document.body.appendChild(page);
-  page.dataset.csource = state.chartSource;
-  if (state.chartSource === 'tv') syncChartSourceButtons();
 
   // 휴대폰: 한 번에 한 화면 — 차트 · 주문 · 호가 · 포지션 (넓은 화면은 탭을 숨기고 세 칸을 함께 보여 준다)
   const PANE_SELECTORS = { chart: '.trade-chart-panel', order: '.trade-ticket', book: '.trade-orderbook', positions: '.trade-orders-panel' };
@@ -149,7 +124,7 @@
     });
     const pane = $(PANE_SELECTORS[view]);
     if (pane) pane.scrollTop = 0;
-    if (view === 'chart') requestAnimationFrame(drawChart);
+    if (view === 'chart') requestAnimationFrame(mountTradingView);
     if (view === 'book') requestAnimationFrame(renderOrderBook);
   }
   $('#trade-msv').addEventListener('click', (event) => {
@@ -161,44 +136,17 @@
   window.LITE.latestDecision = state.latestDecision;
   renderDecisionBanner();
 
-  $('#trade-chart-src').addEventListener('click', (event) => {
-    const button = event.target.closest('[data-csrc]');
-    if (button && button.dataset.csrc !== state.chartSource) setChartSource(button.dataset.csrc);
-  });
-
   $('#trade-coin').addEventListener('change', (event) => {
     state.symbol = `${event.target.value}USDT`;
     state.price = null;
     state.change = null;
     state.book = { bids: new Map(), asks: new Map() };
     renderOrderBook();
-    resetChartHistory();
     $('#trade-price').textContent = '—';
     $('#trade-change').textContent = '—';
     loadMarket();
   });
-  $('#trade-frames').addEventListener('click', (event) => {
-    const button = event.target.closest('[data-frame]');
-    if (!button) return;
-    state.frame = FRAMES.find((frame) => frame.key === button.dataset.frame) || FRAMES[3];
-    $$('#trade-frames button').forEach((el) => el.classList.toggle('active', el === button));
-    resetChartHistory();
-    loadMarket();
-  });
-  $('#trade-latest').addEventListener('click', () => {
-    state.chart.rightTime = null;
-    $('#trade-history-status').textContent = '';
-    drawChart();
-  });
   $('#trade-ai-apply').addEventListener('click', applyLatestDecision);
-  $('#trade-indicators').addEventListener('change', (event) => {
-    const input = event.target.closest('[data-indicator]');
-    if (!input) return;
-    if (input.checked) state.indicators.add(input.dataset.indicator);
-    else state.indicators.delete(input.dataset.indicator);
-    $('#trade-rsi-wrap').classList.toggle('hidden', !state.indicators.has('rsi'));
-    drawChart();
-  });
   $('#trade-subtabs').addEventListener('click', (event) => {
     const button = event.target.closest('[data-tab]');
     if (!button) return;
@@ -256,53 +204,6 @@
   LITE.bus.subscribe((event) => {
     if (event && event.type === 'position') renderPositions();
   });
-  window.addEventListener('resize', drawChart);
-  const chartCanvas = $('#trade-chart');
-  chartCanvas.addEventListener('pointerdown', (event) => {
-    if (event.button !== 0 || state.candles.length < 2) return;
-    chartCanvas.setPointerCapture(event.pointerId);
-    state.chart.drag = {
-      pointerId: event.pointerId,
-      x: event.clientX,
-      rightTime: state.chart.rightTime == null ? state.candles[state.candles.length - 1].t : state.chart.rightTime,
-      width: chartCanvas.getBoundingClientRect().width,
-    };
-    chartCanvas.classList.add('dragging');
-  });
-  chartCanvas.addEventListener('pointermove', (event) => {
-    const drag = state.chart.drag;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    const step = Math.max(1, drag.width / state.chart.visibleCount);
-    const latest = state.candles[state.candles.length - 1].t;
-    state.chart.rightTime = Math.min(latest, drag.rightTime - ((event.clientX - drag.x) / step) * state.frame.ms);
-    drawChart();
-    maybeLoadOlder();
-  });
-  const endChartDrag = (event) => {
-    if (!state.chart.drag || state.chart.drag.pointerId !== event.pointerId) return;
-    state.chart.drag = null;
-    chartCanvas.classList.remove('dragging');
-  };
-  chartCanvas.addEventListener('pointerup', endChartDrag);
-  chartCanvas.addEventListener('pointercancel', endChartDrag);
-  chartCanvas.addEventListener('wheel', (event) => {
-    if (state.view !== 'trading' || state.candles.length < 2) return;
-    event.preventDefault();
-    const oldCount = state.chart.visibleCount;
-    const nextCount = Math.max(20, Math.min(500, Math.round(oldCount * Math.exp(event.deltaY * 0.001))));
-    if (nextCount === oldCount) return;
-    const range = visibleRange();
-    const bounds = chartCanvas.getBoundingClientRect();
-    const xRatio = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
-    const anchorIndex = range.start + xRatio * (range.end - range.start);
-    const nextEnd = Math.round(anchorIndex + (1 - xRatio) * (nextCount - 1));
-    state.chart.visibleCount = nextCount;
-    state.chart.rightTime = nextCount === oldCount ? state.chart.rightTime : (state.chart.rightTime == null && nextEnd >= state.candles.length - 1
-      ? null
-      : state.candles[Math.max(0, Math.min(state.candles.length - 1, nextEnd))].t);
-    drawChart();
-    maybeLoadOlder();
-  }, { passive: false });
 
   function setView(view) {
     state.view = view === 'trading' ? 'trading' : view === 'screener' ? 'screener' : view === 'whale' ? 'whale' : view === 'dash' ? 'dash' : 'office';
@@ -324,7 +225,7 @@
       refreshSubscriptions();
       refreshTimer();
       renderPositions();
-      if (state.mobileView === 'chart') requestAnimationFrame(drawChart);
+      if (state.mobileView === 'chart') requestAnimationFrame(mountTradingView);
     } else {
       if (state.loadTimer) clearInterval(state.loadTimer);
       if (state.markTimer) clearInterval(state.markTimer);
@@ -335,54 +236,23 @@
     }
   }
 
-  // ===== 차트 종류 전환: 📊 우리 차트(모의 포지션 선·지표) ↔ 📈 트레이딩뷰 공식 위젯 =====
-  const tv = { widget: null, script: null };
+  // ===== 차트는 트레이딩뷰 공식 위젯 하나만 — 우리 캔버스 차트·지표 체크박스·시간봉 버튼은 없앴다 =====
+  // (2026-11-20 홍원 님 "아니 저렇게 말고 우리차트는 지우고 트레이딩뷰만 사용할거야 전부다")
+  // 시간봉·지표는 위젯 자체 툴바에서 고르고, 우리 화면은 종목만 위젯과 맞춘다.
+  const tv = { widget: null, script: null, symbol: '', width: 0, noteTimer: 0 };
   // 위젯은 거래소 심볼을 따로 쓴다 — 바이비트 무기한(BYBIT:BTCUSDT.P), 미국 주식은 NASDAQ
   const TV_STOCKS = {
     NVDA: 'NASDAQ:NVDA', AAPL: 'NASDAQ:AAPL', MSFT: 'NASDAQ:MSFT', TSLA: 'NASDAQ:TSLA', AMZN: 'NASDAQ:AMZN',
     GOOGL: 'NASDAQ:GOOGL', META: 'NASDAQ:META', AMD: 'NASDAQ:AMD', COIN: 'NASDAQ:COIN', MSTR: 'NASDAQ:MSTR',
     SPY: 'AMEX:SPY', QQQ: 'NASDAQ:QQQ', TQQQ: 'NASDAQ:TQQQ',
   };
-  const TV_INTERVALS = { '1m': '1', '3m': '3', '5m': '5', '15m': '15', '30m': '30', '1H': '60', '4H': '240', '1D': 'D', '1W': 'W' };
-
-  function readChartSource() {
-    try {
-      return localStorage.getItem(CHART_SOURCE_KEY) === 'tv' ? 'tv' : 'lite';
-    } catch (error) {
-      return 'lite';
-    }
-  }
+  const TV_INTERVAL = '15'; // 첫 화면 시간봉 — 이후에는 위젯 툴바에서 고른다
 
   function tvSymbol(symbol) {
     const code = String(symbol || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
     if (!code) return 'BYBIT:BTCUSDT.P';
     if (TV_STOCKS[code]) return TV_STOCKS[code];
     return `BYBIT:${code.replace(/USDT$/, '')}USDT.P`;
-  }
-
-  function setChartSource(source) {
-    const next = source === 'tv' ? 'tv' : 'lite';
-    state.chartSource = next;
-    page.dataset.csource = next;
-    syncChartSourceButtons();
-    try {
-      localStorage.setItem(CHART_SOURCE_KEY, next);
-    } catch (error) {
-      // 저장이 막혀도 이번 화면에서는 동작한다
-    }
-    if (next === 'tv') mountTradingView();
-    else {
-      clearTradingView();
-      requestAnimationFrame(drawChart);
-    }
-  }
-
-  function syncChartSourceButtons() {
-    $$('#trade-chart-src [data-csrc]').forEach((button) => {
-      const on = button.dataset.csrc === state.chartSource;
-      button.classList.toggle('active', on);
-      button.setAttribute('aria-pressed', String(on));
-    });
   }
 
   function loadTvScript() {
@@ -401,31 +271,40 @@
     return tv.script;
   }
 
-  function clearTradingView() {
-    const host = $('#trade-tv-chart');
-    if (host) host.innerHTML = '';
-    tv.widget = null;
+  function showTvNote(text) {
+    const note = $('#trade-tv-note');
+    if (!note) return;
+    note.textContent = text;
+    note.classList.remove('hidden');
+  }
+
+  function hideTvNote() {
+    const note = $('#trade-tv-note');
+    if (note) note.classList.add('hidden');
   }
 
   function mountTradingView() {
-    if (state.view !== 'trading' || state.chartSource !== 'tv') return;
+    if (state.view !== 'trading') return;
     const host = $('#trade-tv-chart');
-    const note = $('#trade-tv-note');
-    if (!host || !note) return;
-    note.textContent = '트레이딩뷰 차트를 불러오는 중…';
-    note.classList.remove('hidden');
+    if (!host) return;
+    // 숨은 칸(휴대폰의 다른 탭)에서는 폭이 0이라 위젯이 찌그러진다 — 보이는 칸이 생기면 그때 만든다
+    if (!host.clientWidth || !host.clientHeight) return;
+    const symbol = tvSymbol(state.symbol);
+    if (tv.widget && tv.symbol === symbol && tv.width) return;
+    tv.symbol = symbol;
+    tv.width = host.clientWidth;
+    showTvNote('트레이딩뷰 차트를 불러오는 중…');
     loadTvScript().then(() => {
-      if (state.chartSource !== 'tv' || state.view !== 'trading') return;
-      host.innerHTML = '';
-      tv.widget = null;
+      if (state.view !== 'trading' || tvSymbol(state.symbol) !== symbol) return;
       // 위젯은 칸의 실제 크기를 재고 그리므로, 화면에 올린 다음 프레임에 만든다
       requestAnimationFrame(() => {
-        if (state.chartSource !== 'tv' || state.view !== 'trading') return;
+        if (!host.clientWidth || !host.clientHeight) return;
+        host.innerHTML = '';
         try {
           tv.widget = new window.TradingView.widget({
             container_id: 'trade-tv-chart',
-            symbol: tvSymbol(state.symbol),
-            interval: TV_INTERVALS[state.frame.key] || '15',
+            symbol,
+            interval: TV_INTERVAL,
             theme: 'dark',
             style: '1',
             locale: 'kr',
@@ -435,7 +314,8 @@
             gridColor: 'rgba(38,49,67,.55)',
             autosize: true,
             hide_top_toolbar: false,
-            hide_side_toolbar: false,
+            hide_side_toolbar: window.innerWidth <= 768,
+            hide_legend: false,
             allow_symbol_change: false,
             save_image: false,
             withdateranges: true,
@@ -444,14 +324,15 @@
             enable_publishing: false,
           });
           const iframe = host.querySelector('iframe');
-          if (iframe) iframe.addEventListener('load', () => note.classList.add('hidden'));
-          setTimeout(() => { if (state.chartSource === 'tv') note.classList.add('hidden'); }, 6000);
+          if (iframe) iframe.addEventListener('load', hideTvNote);
+          if (tv.noteTimer) clearTimeout(tv.noteTimer);
+          tv.noteTimer = setTimeout(hideTvNote, 8000);
         } catch (error) {
-          note.textContent = '트레이딩뷰 위젯을 띄우지 못했어요. 새로고침 후 다시 시도해 주세요.';
+          showTvNote('트레이딩뷰 위젯을 띄우지 못했어요. 새로고침 후 다시 시도해 주세요.');
         }
       });
     }).catch(() => {
-      note.textContent = '트레이딩뷰 위젯을 불러오지 못했어요. 인터넷 연결이나 광고 차단 설정을 확인해 주세요.';
+      showTvNote('트레이딩뷰 위젯을 불러오지 못했어요. 인터넷 연결이나 광고 차단 설정을 확인해 주세요.');
     });
   }
 
@@ -547,7 +428,6 @@
       state.change = null;
       state.book = { bids: new Map(), asks: new Map() };
       renderOrderBook();
-      resetChartHistory();
       loadMarket();
     }
     updateTicket();
@@ -558,119 +438,18 @@
 
   async function loadMarket() {
     if (state.view !== 'trading') return;
-    // 차트 종류가 트레이딩뷰면 지금 종목·시간봉으로 공식 위젯을 다시 띄운다
-    if (state.chartSource === 'tv') mountTradingView();
-    const seq = ++state.requestSeq;
-    state.chart.loadingOlder = false;
-    state.chart.exhausted = false;
-    $('#trade-chart-message').textContent = 'Bybit 캔들을 불러오는 중…';
-    $('#trade-chart-message').classList.remove('hidden');
+    // 차트는 트레이딩뷰 위젯 — 지금 종목으로 맞춘다 (이미 같은 종목이면 그대로 둔다)
+    mountTradingView();
     $('#trade-coin').value = state.symbol.replace(/USDT$/, '');
-    try {
-      const url = `${candleUrl}?category=linear&symbol=${encodeURIComponent(state.symbol)}&interval=${state.frame.api}&limit=500`;
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`Bybit 캔들 HTTP ${response.status}`);
-      const body = await response.json();
-      if (body.retCode !== 0 || !Array.isArray(body.result && body.result.list)) {
-        throw new Error(`Bybit 캔들 오류: ${body.retMsg || '응답을 읽을 수 없습니다'}`);
-      }
-      if (seq !== state.requestSeq) return;
-      state.candles = parseCandles(body.result.list);
-      if (state.candles.length < 2) throw new Error('Bybit 캔들 데이터가 부족합니다.');
-      $('#trade-chart-message').classList.add('hidden');
-      $('#trade-history-status').textContent = '';
-      drawChart();
-      refreshSubscriptions();
-    } catch (error) {
-      if (seq !== state.requestSeq) return;
-      $('#trade-chart-message').textContent = error.message || '시세를 불러오지 못했습니다.';
-      $('#trade-chart-message').classList.remove('hidden');
-    }
     refreshTickers();
-  }
-
-  function parseCandles(rows) {
-    return rows.map((row) => ({
-      t: Number(row[0]), o: Number(row[1]), h: Number(row[2]), l: Number(row[3]), c: Number(row[4]), v: Number(row[5]),
-    })).filter((candle) => [candle.t, candle.o, candle.h, candle.l, candle.c, candle.v].every(Number.isFinite))
-      .sort((a, b) => a.t - b.t);
-  }
-
-  function resetChartHistory() {
-    state.chart.rightTime = null;
-    state.chart.loadingOlder = false;
-    state.chart.exhausted = false;
-    $('#trade-history-status').textContent = '';
-    $('#trade-latest').classList.add('hidden');
-  }
-
-  function visibleRange() {
-    const candles = state.candles;
-    if (!candles.length) return { start: 0, end: -1 };
-    const latestIndex = candles.length - 1;
-    let end = latestIndex;
-    if (state.chart.rightTime != null) {
-      let low = 0, high = candles.length;
-      while (low < high) {
-        const mid = (low + high) >> 1;
-        if (candles[mid].t <= state.chart.rightTime) low = mid + 1;
-        else high = mid;
-      }
-      end = low - 1;
-    }
-    return { start: Math.max(0, end - state.chart.visibleCount + 1), end };
-  }
-
-  function maybeLoadOlder() {
-    if (state.view !== 'trading' || state.chart.loadingOlder || state.chart.exhausted || state.candles.length < 2) return;
-    const range = visibleRange();
-    if (range.start <= 35) loadOlderCandles();
-  }
-
-  async function loadOlderCandles() {
-    if (state.chart.loadingOlder || state.chart.exhausted || state.candles.length < 2) return;
-    const seq = state.requestSeq;
-    const symbol = state.symbol;
-    const interval = state.frame.api;
-    const oldest = state.candles[0].t;
-    state.chart.loadingOlder = true;
-    let loaded = false;
-    $('#trade-history-status').textContent = '과거 캔들을 불러오는 중…';
-    try {
-      const url = `${candleUrl}?category=linear&symbol=${encodeURIComponent(symbol)}&interval=${interval}&end=${oldest - 1}&limit=500`;
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`Bybit 과거 캔들 HTTP ${response.status}`);
-      const body = await response.json();
-      if (body.retCode !== 0 || !Array.isArray(body.result && body.result.list)) {
-        throw new Error(`Bybit 과거 캔들 오류: ${body.retMsg || '응답을 읽을 수 없습니다'}`);
-      }
-      if (seq !== state.requestSeq || symbol !== state.symbol || interval !== state.frame.api) return;
-      const older = parseCandles(body.result.list).filter((candle) => candle.t < oldest);
-      if (!older.length) {
-        state.chart.exhausted = true;
-        $('#trade-history-status').textContent = '더 불러올 과거 캔들이 없습니다.';
-        return;
-      }
-      const byTime = new Map(older.concat(state.candles).map((candle) => [candle.t, candle]));
-      state.candles = [...byTime.values()].sort((a, b) => a.t - b.t);
-      loaded = true;
-      $('#trade-history-status').textContent = '';
-      drawChart();
-    } catch (error) {
-      if (seq === state.requestSeq) $('#trade-history-status').textContent = error.message || '과거 캔들을 불러오지 못했습니다.';
-    } finally {
-      if (seq === state.requestSeq) {
-        state.chart.loadingOlder = false;
-        if (loaded) maybeLoadOlder();
-      }
-    }
+    refreshSubscriptions();
   }
 
   function refreshSubscriptions() {
     if (!state.feed || state.view !== 'trading') return;
-    const topics = new Set([`kline.${state.frame.api}.${state.symbol}`, `tickers.${state.symbol}`, `orderbook.50.${state.symbol}`]);
+    // 차트는 트레이딩뷰가 스스로 그리므로 캔들(kline)은 받지 않는다 — 호가·현재가만 구독한다
+    const topics = new Set([`tickers.${state.symbol}`, `orderbook.50.${state.symbol}`]);
     for (const pos of LITE.paper.snapshot().open) {
-      topics.add(`kline.1.${pos.symbol}`);
       topics.add(`tickers.${pos.symbol}`);
     }
     for (const order of state.pending) topics.add(`tickers.${order.symbol}`);
@@ -716,24 +495,7 @@
     changeNode.textContent = `${state.change >= 0 ? '+' : ''}${fmt(state.change, 2)}%`;
     changeNode.className = state.change >= 0 ? 'up' : 'down';
     $('#trade-book-price').textContent = priceText(price);
-    const last = state.candles[state.candles.length - 1];
-    if (last) {
-      const bucket = candleBucket(Date.now());
-      if (bucket === last.t) {
-        last.c = price;
-        last.h = Math.max(last.h, price);
-        last.l = Math.min(last.l, price);
-      } else if (bucket > last.t) {
-        state.candles.push({ t: bucket, o: last.c, h: Math.max(last.c, price), l: Math.min(last.c, price), c: price, v: 0 });
-      }
-    }
     updateTicket();
-    drawChart();
-  }
-
-  function candleBucket(timestamp) {
-    if (state.frame.api === 'W') return Math.floor((timestamp - 3 * 86400000) / state.frame.ms) * state.frame.ms + 3 * 86400000;
-    return Math.floor(timestamp / state.frame.ms) * state.frame.ms;
   }
 
   function updateBookSide(side, levels) {
@@ -796,24 +558,7 @@
     }
     if (tick.type === 'ticker') {
       processPrice(tick.symbol, tick.price, tick.changePct);
-      return;
     }
-    if (tick.symbol === state.symbol && tick.interval === state.frame.api) {
-      const candle = { t: tick.t, o: tick.o, h: tick.h, l: tick.l, c: tick.c, v: tick.v || 0 };
-      const index = state.candles.findIndex((item) => item.t === candle.t);
-      if (index >= 0) state.candles[index] = candle;
-      else if (!state.candles.length || candle.t > state.candles[state.candles.length - 1].t) state.candles.push(candle);
-      state.price = tick.c;
-      drawChart();
-      updateTicket();
-    }
-    for (const pos of LITE.paper.snapshot().open) {
-      if (pos.symbol !== tick.symbol || tick.symbol === state.symbol) continue;
-      const result = LITE.paper.tick(pos.symbol, tick.c);
-      result.done.forEach((position) => LITE.bus.emit({ type: 'position', action: 'close', position }));
-      if (result.marked) scheduleAccountRefresh();
-    }
-    renderPositions();
   }
 
   function processPrice(symbol, price, change) {
@@ -981,162 +726,8 @@
     if (table) table.classList.toggle('is-empty', !!body.querySelector('.trade-empty'));
   }
 
-  function average(index, period, exponential) {
-    const values = state.candles.slice(0, index + 1).map((candle) => candle.c);
-    if (values.length < period) return null;
-    if (!exponential) return values.slice(-period).reduce((sum, value) => sum + value, 0) / period;
-    const alpha = 2 / (period + 1);
-    let value = values.slice(0, period).reduce((sum, price) => sum + price, 0) / period;
-    for (let i = period; i < values.length; i++) value += alpha * (values[i] - value);
-    return value;
-  }
-
-  function drawChart() {
-    // 트레이딩뷰 위젯이 차트 칸을 쓰는 동안은 우리 캔버스를 다시 그리지 않는다
-    if (state.chartSource === 'tv') return;
-    const canvas = $('#trade-chart');
-    if (!canvas || document.documentElement.classList.contains('hidden')) return;
-    const box = canvas.getBoundingClientRect();
-    if (!box.width || !box.height) return;
-    const ratio = window.devicePixelRatio || 1;
-    canvas.width = Math.round(box.width * ratio);
-    canvas.height = Math.round(box.height * ratio);
-    const ctx = canvas.getContext('2d');
-    ctx.scale(ratio, ratio);
-    ctx.clearRect(0, 0, box.width, box.height);
-    const allData = state.candles;
-    const range = visibleRange();
-    const data = allData.slice(range.start, range.end + 1);
-    updateLatestButton();
-    if (data.length < 2) return;
-    const positionLevels = LITE.paper.snapshot().open
-      .filter((position) => position.symbol === state.symbol)
-      .flatMap((position) => [
-        { label: '진입', price: position.entry, color: '#cbd5e1' },
-        ...(position.target ? [{ label: 'TP', price: position.target, color: '#22c58b' }] : []),
-        ...(position.stop && position.stop !== position.liq ? [{ label: 'SL', price: position.stop, color: '#f05268' }] : []),
-      ]);
-    const hasVolume = state.indicators.has('volume');
-    const hasRsi = state.indicators.has('rsi');
-    const chartBottom = box.height - (hasVolume ? 52 : 18) - (hasRsi ? 8 : 0);
-    const max = Math.max(...data.map((candle) => candle.h), ...positionLevels.map((level) => level.price));
-    const min = Math.min(...data.map((candle) => candle.l), ...positionLevels.map((level) => level.price));
-    const pad = (max - min || max * 0.001) * 0.08;
-    const top = min - pad, high = max + pad;
-    const y = (price) => chartBottom - ((price - top) / (high - top)) * (chartBottom - 22);
-    const xStep = box.width / data.length;
-    ctx.font = '10px monospace';
-    ctx.textBaseline = 'middle';
-    ctx.strokeStyle = '#263247';
-    ctx.fillStyle = '#77849a';
-    for (let i = 0; i < 5; i++) {
-      const py = 16 + (chartBottom - 16) * i / 4;
-      ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(box.width, py); ctx.stroke();
-      ctx.fillText(fmt(high - (high - top) * i / 4, state.price < 1 ? 5 : 2), 5, py + 1);
-    }
-    const volumeMax = Math.max(...data.map((candle) => candle.v || 0)) || 1;
-    data.forEach((candle, index) => {
-      const cx = index * xStep + xStep / 2;
-      const rise = candle.c >= candle.o;
-      const color = rise ? '#22c58b' : '#f05268';
-      ctx.strokeStyle = color;
-      ctx.fillStyle = rise ? 'rgba(34,197,139,.8)' : 'rgba(240,82,104,.82)';
-      ctx.beginPath(); ctx.moveTo(cx, y(candle.h)); ctx.lineTo(cx, y(candle.l)); ctx.stroke();
-      const barWidth = Math.max(1, xStep * 0.62);
-      const bodyTop = Math.min(y(candle.o), y(candle.c));
-      const bodyHeight = Math.max(1, Math.abs(y(candle.o) - y(candle.c)));
-      ctx.fillRect(cx - barWidth / 2, bodyTop, barWidth, bodyHeight);
-      if (hasVolume) {
-        const volumeHeight = (candle.v || 0) / volumeMax * 34;
-        ctx.fillStyle = rise ? 'rgba(34,197,139,.22)' : 'rgba(240,82,104,.22)';
-        ctx.fillRect(cx - barWidth / 2, box.height - 38 - volumeHeight, barWidth, volumeHeight);
-      }
-    });
-    if (state.indicators.has('ma20')) drawLine(ctx, data, range.start, (i) => average(i, 20, false), xStep, y, '#eabf54');
-    if (state.indicators.has('ma50')) drawLine(ctx, data, range.start, (i) => average(i, 50, false), xStep, y, '#69a9ff');
-    if (state.indicators.has('ema20')) drawLine(ctx, data, range.start, (i) => average(i, 20, true), xStep, y, '#bc86ff');
-    if (state.indicators.has('bb')) {
-      drawLine(ctx, data, range.start, (i) => bollinger(i).upper, xStep, y, 'rgba(148,163,184,.8)');
-      drawLine(ctx, data, range.start, (i) => bollinger(i).lower, xStep, y, 'rgba(148,163,184,.8)');
-    }
-    if (state.price) {
-      ctx.setLineDash([4, 4]); ctx.strokeStyle = '#e2e8f0'; ctx.beginPath(); ctx.moveTo(0, y(state.price)); ctx.lineTo(box.width, y(state.price)); ctx.stroke(); ctx.setLineDash([]);
-    }
-    positionLevels.forEach((level) => {
-      const py = y(level.price);
-      ctx.setLineDash([5, 4]);
-      ctx.strokeStyle = level.color;
-      ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(box.width - 76, py); ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = level.color;
-      ctx.fillRect(box.width - 74, py - 9, 72, 18);
-      ctx.fillStyle = '#0b0e13';
-      ctx.font = '9px monospace';
-      ctx.fillText(`${level.label} ${priceText(level.price)}`, box.width - 70, py);
-    });
-    if (hasRsi) drawRsi(range.start, range.end);
-  }
-
-  function drawLine(ctx, data, offset, calc, xStep, y, color) {
-    ctx.beginPath();
-    ctx.strokeStyle = color;
-    let started = false;
-    data.forEach((_, index) => {
-      const value = calc(offset + index);
-      if (!Number.isFinite(value)) return;
-      const px = index * xStep + xStep / 2;
-      if (!started) { ctx.moveTo(px, y(value)); started = true; }
-      else ctx.lineTo(px, y(value));
-    });
-    if (started) ctx.stroke();
-  }
-
-  function bollinger(index) {
-    if (index < 19) return { upper: null, lower: null };
-    const values = state.candles.slice(index - 19, index + 1).map((candle) => candle.c);
-    const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
-    const deviation = Math.sqrt(values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length);
-    return { upper: mean + 2 * deviation, lower: mean - 2 * deviation };
-  }
-
-  function drawRsi(start, end) {
-    const canvas = $('#trade-rsi');
-    const box = canvas.getBoundingClientRect();
-    if (!box.width || !box.height) return;
-    const ratio = window.devicePixelRatio || 1;
-    canvas.width = Math.round(box.width * ratio); canvas.height = Math.round(box.height * ratio);
-    const ctx = canvas.getContext('2d'); ctx.scale(ratio, ratio);
-    ctx.clearRect(0, 0, box.width, box.height);
-    const values = [];
-    for (let i = Math.max(14, start); i <= end; i++) {
-      let gain = 0, loss = 0;
-      for (let j = i - 13; j <= i; j++) {
-        const change = state.candles[j].c - state.candles[j - 1].c;
-        if (change > 0) gain += change; else loss -= change;
-      }
-      values.push({ index: i, value: loss === 0 ? 100 : 100 - 100 / (1 + gain / loss) });
-    }
-    ctx.strokeStyle = '#273247'; ctx.setLineDash([3, 3]);
-    [30, 50, 70].forEach((rsi) => { const py = box.height * (1 - rsi / 100); ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(box.width, py); ctx.stroke(); });
-    ctx.setLineDash([]); ctx.strokeStyle = '#bf8fff'; ctx.beginPath();
-    let started = false;
-    values.forEach(({ index, value }) => {
-      const px = (index - start) * box.width / Math.max(1, end - start + 1);
-      const py = box.height * (1 - value / 100);
-      if (!started) { ctx.moveTo(px, py); started = true; }
-      else ctx.lineTo(px, py);
-    });
-    if (started) ctx.stroke();
-  }
-
-  function updateLatestButton() {
-    const range = visibleRange();
-    $('#trade-latest').classList.toggle('hidden', state.chart.rightTime == null || range.end >= state.candles.length - 1);
-  }
-
   function refreshPositions() {
     renderPositions();
-    drawChart();
     refreshSubscriptions();
   }
   LITE.bus.subscribe((event) => { if (event && event.type === 'position') refreshPositions(); });
@@ -1157,7 +748,6 @@
     state.change = null;
     state.book = { bids: new Map(), asks: new Map() };
     renderOrderBook();
-    resetChartHistory();
     $('#trade-price').textContent = '—';
     $('#trade-change').textContent = '—';
     if (select && base) select.value = base;

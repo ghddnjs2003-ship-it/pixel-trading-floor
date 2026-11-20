@@ -30,15 +30,28 @@ html.lite-first #analyze-btn:not(:disabled) { animation: lite-call 1s steps(2) i
 @keyframes lite-call { 50% { box-shadow: 3px 3px 0 #000, 0 0 0 3px #e8c84a; } }
 html.lite-out #analyze-btn { background: #e8c84a; color: #1a1408; animation: none; }
 
-/* 상단 차트 — 진입·목표·손절·현재가 표시가 들어가게 키운다 (범례는 차트 안에 그린다) */
+/* 상단 차트 — 자체 캔버스 대신 트레이딩뷰 공식 위젯 하나 (2026-11-20 "우리차트는 지우고 트레이딩뷰만") */
 #chart-legend { display: none; }
-html:not(.m) #chart { height: clamp(104px, 15vh, 150px); }
-/* 휴대폰: 시세 한 줄 아래에 차트를 화면 폭 그대로 */
+html:not(.m) #chart-wrap { height: clamp(200px, 26vh, 300px); }
+#office-tv {
+  position: relative; flex: 1 1 auto; min-width: 0; display: flex;
+  background: #08080e; border: 2px solid #1c1c28; overflow: hidden;
+}
+#office-tv-chart, #office-tv-chart > div, #office-tv-chart iframe { width: 100%; height: 100%; }
+#office-tv-note {
+  position: absolute; inset: 0; display: grid; place-items: center; padding: 10px;
+  color: #8a8aa4; background: rgba(8, 8, 14, .92); font-size: 11px; text-align: center;
+}
+#office-tv-note.hidden { display: none; }
+/* 휴대폰 픽셀 오피스 — 차트가 커진 만큼 화면을 세로로 이어 본다 (아래 판정 줄·모의 계좌가 잘리지 않게) */
+html.m:not(.dash-view):not(.trading-view):not(.screener-view):not(.whale-view) #app { overflow-y: auto; overflow-x: hidden; }
+html.m:not(.dash-view):not(.trading-view):not(.screener-view):not(.whale-view) #app > * { flex: none; }
+html.m:not(.dash-view):not(.trading-view):not(.screener-view):not(.whale-view) #floor { flex: none; height: 420px; }
+/* 휴대폰: 시세 한 줄 아래에 차트를 화면 폭 그대로 — 캔들이 넓게 보이게 300px */
 html.m #board { flex-wrap: wrap; row-gap: 4px; }
 html.m #board-info { display: flex; flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
 html.m #board-price { font-size: 17px; }
-html.m #chart-wrap { flex: 1 1 100%; }
-html.m #chart { height: 92px !important; }
+html.m #chart-wrap { flex: 1 1 100%; height: 300px; }
 
 /* 매매 내역 창 */
 #lite-hist { position: fixed; inset: 0; z-index: 100000; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(4, 4, 10, .72); }
@@ -248,52 +261,20 @@ html.trading-view #trade-page { position: fixed; inset: 54px 0 0; z-index: 10000
 .trade-book-hint { flex: none; padding-top: 4px; color: #667489; font-size: 8px; text-align: center; }
 #view-switch button:disabled { color: #687284; background: #161a21; border-color: #262d38; cursor: not-allowed; opacity: .5; }
 .trade-chart-panel { display: flex; flex-direction: column; overflow: hidden; }
-.trade-chart-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 42px; padding: 5px 10px; border-bottom: 1px solid #263143; }
-.trade-frame-tabs, .trade-indicators, .trade-order-types, .trade-percent-buttons, .trade-margin-modes { display: flex; align-items: center; gap: 5px; }
-.trade-frame-tabs { flex-wrap: wrap; }
-.trade-frame-tabs button, .trade-order-types button, .trade-margin-modes button, .trade-percent-buttons button {
+/* 차트는 트레이딩뷰 공식 위젯 하나 — 자체 캔버스·지표 체크박스·시간봉 버튼은 없다 (위젯 툴바에서 고른다) */
+.trade-order-types, .trade-percent-buttons, .trade-margin-modes { display: flex; align-items: center; gap: 5px; }
+.trade-order-types button, .trade-margin-modes button, .trade-percent-buttons button {
   color: #95a1b3; background: #131b27; border: 1px solid #303b4e; border-radius: 3px; padding: 6px 9px; cursor: pointer; font-size: 10px;
 }
-.trade-frame-tabs button.active, .trade-order-types button.active { color: #e6edf7; background: #263247; border-color: #5a6b83; }
-.trade-indicators { flex-wrap: wrap; justify-content: flex-end; gap: 5px 10px; }
-.trade-indicators label { display: inline-flex; align-items: center; gap: 4px; color: #96a2b3; font-size: 9px; white-space: nowrap; cursor: pointer; }
-.trade-indicators input { accent-color: #56a8ff; margin: 0; }
-.trade-chart-wrap { position: relative; flex: 1; min-height: 130px; }
-#trade-chart { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
-#trade-chart.dragging { cursor: grabbing; }
-#trade-chart-message { position: absolute; inset: 0; display: grid; place-items: center; color: #8d99aa; background: rgba(11,14,19,.78); font-size: 12px; }
-#trade-chart-message.hidden { display: none; }
-#trade-history-status { position: absolute; bottom: 8px; left: 10px; z-index: 2; color: #e9ba62; font-size: 10px; pointer-events: none; }
-#trade-latest { position: absolute; right: 12px; bottom: 52px; z-index: 3; color: #e2e8f0; background: #263247; border: 1px solid #52647e; border-radius: 4px; padding: 6px 10px; cursor: pointer; font-size: 10px; }
-#trade-latest:hover { background: #34445c; }
-#trade-latest.hidden { display: none; }
-.trade-rsi-wrap { display: flex; align-items: stretch; gap: 8px; height: 62px; padding: 4px 10px; border-top: 1px solid #263143; color: #8d99aa; font-size: 9px; }
-.trade-rsi-wrap.hidden { display: none; }
-#trade-rsi { flex: 1; width: 100%; height: 50px; }
-
-/* ── 차트 종류 전환 — 📊 우리 차트(모의 포지션 선·지표) ↔ 📈 트레이딩뷰 공식 위젯 ── */
-.trade-toolbar-main { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
-.trade-chart-src { display: flex; flex: none; align-items: center; gap: 4px; }
-.trade-chart-src button {
-  padding: 6px 9px; color: #95a1b3; background: #131b27; border: 1px solid #303b4e; border-radius: 3px;
-  cursor: pointer; font-size: 10px; white-space: nowrap;
-}
-.trade-chart-src button:hover { color: #cdd8e6; border-color: #46566e; }
-.trade-chart-src button.active { color: #eaf6f0; background: #1a3a2f; border-color: #2a715b; }
-.trade-tv { position: absolute; inset: 0; z-index: 4; display: none; overflow: hidden; background: #0b0e13; }
-#trade-page[data-csource="tv"] .trade-tv { display: block; }
+.trade-order-types button.active { color: #e6edf7; background: #263247; border-color: #5a6b83; }
+.trade-chart-wrap { position: relative; flex: 1; min-height: 200px; display: flex; }
+.trade-tv { position: relative; flex: 1 1 auto; min-width: 0; display: block; overflow: hidden; background: #0b0e13; }
 #trade-tv-chart, #trade-tv-chart > div, #trade-tv-chart iframe { width: 100%; height: 100%; }
 #trade-tv-note {
   position: absolute; inset: 0; display: grid; place-items: center; padding: 12px;
   color: #8d99aa; background: rgba(11, 14, 19, .92); font-size: 12px; text-align: center;
 }
 #trade-tv-note.hidden { display: none; }
-/* 트레이딩뷰 위젯이 켜지면 우리 차트 전용 조작부는 감춘다 (위젯 안에 같은 기능이 있다) */
-#trade-page[data-csource="tv"] .trade-indicators,
-#trade-page[data-csource="tv"] .trade-rsi-wrap,
-#trade-page[data-csource="tv"] #trade-latest,
-#trade-page[data-csource="tv"] #trade-history-status,
-#trade-page[data-csource="tv"] #trade-chart-message { display: none; }
 .trade-orders-panel { display: flex; flex-direction: column; overflow: hidden; }
 .trade-subtabs { display: flex; gap: 16px; height: 40px; padding: 0 12px; border-bottom: 1px solid #263143; }
 .trade-subtabs button { position: relative; color: #8f9bad; background: none; border: 0; cursor: pointer; font-size: 11px; }
@@ -401,14 +382,7 @@ html.trading-view #trade-page { position: fixed; inset: 54px 0 0; z-index: 10000
   .trade-orderbook { padding: 8px; }
   .trade-marketbar, .trade-ai-banner, .trade-account-footer, .trade-msv { flex: none; }
 
-  .trade-chart-toolbar { align-items: flex-start; flex-direction: column; min-height: 0; gap: 5px; padding: 6px 7px; }
-  .trade-indicators { justify-content: flex-start; gap: 6px 10px; }
-  .trade-frame-tabs { gap: 4px; }
-  .trade-frame-tabs button { min-width: 44px; min-height: 34px; padding: 5px 9px; }
-  .trade-toolbar-main { width: 100%; gap: 5px; }
-  .trade-chart-src { width: 100%; gap: 4px; }
-  .trade-chart-src button { flex: 1 1 0; min-width: 0; min-height: 34px; padding: 5px 8px; font-size: 10px; }
-  .trade-tv { border-top: 1px solid #263143; }
+  .trade-chart-wrap { min-height: 0; }
 
   .trade-ticket-head, .trade-order-types, .trade-order-summary, #trade-order-error,
   .trade-actions, .trade-disclaimer, .trade-risk-fields, .trade-field-wide { grid-column: 1 / -1; }

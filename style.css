@@ -34,7 +34,7 @@ html, body {
 
 body { min-width: 1100px; overflow-x: hidden; }
 
-canvas, .sprite, #chart { image-rendering: pixelated; }
+canvas, .sprite { image-rendering: pixelated; }
 
 /* --- CRT scanline overlay --- */
 .crt {
@@ -194,12 +194,8 @@ body.attack-mode #dp-scalp::after {
 #board-change.up   { color: var(--green); }
 #board-change.down { color: var(--red); }
 
-#chart {
-  flex: 1;
-  height: 96px;
-  background: #000;
-  border: 2px solid #1c1c28;
-}
+/* 상단 차트 칸 — 안에는 트레이딩뷰 위젯(#office-tv)이 들어간다 */
+#chart-wrap { position: relative; flex: 1; display: flex; min-width: 0; }
 
 /* ==========================================================================
    VENUE BOARD (다중 거래소 전광판)
@@ -833,8 +829,7 @@ body.attack-mode #dp-scalp::after {
 #market-badge.closed .dot { animation: none; }
 @keyframes mb-blink { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
 
-#chart-wrap { position: relative; flex: 1; display: flex; }
-#chart-wrap #chart { flex: 1; }
+#chart-wrap #office-tv { flex: 1; }
 #chart-legend {
   position: absolute;
   top: 5px; right: 8px;
@@ -1476,7 +1471,7 @@ body.vertical #board { margin: 8px 10px 0; flex-wrap: wrap; gap: 8px; }
 body.vertical #board-info { min-width: 140px; }
 body.vertical #board-symbol { font-size: 24px; }
 body.vertical #board-price { font-size: 36px; }
-body.vertical #chart { height: 110px; }
+body.vertical #chart-wrap { height: 240px; }
 body.vertical #alerts-panel { width: 100%; }
 body.vertical #ap-list { max-height: 72px; }
 body.vertical #venue-board { margin: 8px 10px 0; }

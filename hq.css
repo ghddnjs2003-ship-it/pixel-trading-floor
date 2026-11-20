@@ -430,7 +430,6 @@ html.m #mv-report-btn { display: inline-block; }
 
 /* 데스크톱인데 화면이 낮으면(노트북 등) 위쪽 차트를 줄여 사무실 높이를 확보한다 */
 @media (max-height: 1000px) {
-  html:not(.m) #chart { height: 58px; }
   html:not(.m) #ap-list { max-height: 50px; }
   html:not(.m) #board { padding-top: 6px; padding-bottom: 6px; }
   html:not(.m) #disclaimer { display: none; }
@@ -480,7 +479,6 @@ html.m #board-price { font-size: 18px; grid-column: 1 / -1; }
 html.m #board-change { font-size: 11px; }
 html.m #market-badge { font-size: 8px; padding: 0 4px; }
 html.m #chart-wrap { flex: 1; min-width: 0; }
-html.m #chart { height: 44px !important; }
 html.m #chart-legend { display: none; }
 html.m #alerts-panel, html.m #venue-board { display: none !important; }
 
