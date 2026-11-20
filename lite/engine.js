@@ -80,6 +80,8 @@
         log(deps.gemini && !kiosk
           ? '> 픽셀 트레이딩 플로어 — 13인 팀이 Gemini AI로 분석합니다 (판정은 리스크 규칙 게이트를 거칩니다)'
           : '> 데모 버전 — AI 엔진 대신 자체 트레이딩 로직으로 판정합니다');
+        // 판정 출처 배지 — Gemini를 쓰지 않는 실행(시연·?ai=0)은 처음부터 '체험 규칙'으로 표시
+        if (!(deps.gemini && !kiosk && opts.ai !== false)) emit({ type: 'ai', ok: false, code: 'rule' });
         log(`> 바이낸스 ${sym.display} 시세 요청…`);
         const snap = await deps.data.fetchSnapshot(sym);
         const base = Brain.analyze(snap, { lev, mode });
