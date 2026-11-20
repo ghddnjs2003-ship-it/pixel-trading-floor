@@ -23,6 +23,15 @@
 - `data/global.json` — 미 선물·달러 인덱스·원/달러 스냅숏(24시간 스파크 포함). `scripts/update-global.py`가 만들고 `.github/workflows/update-global.yml`이 10분마다 갱신합니다
 - `backend/` — 선택 사항인 Python 서버. 13인 LLM 분석(무료 API·로컬 Ollama 공용 어댑터), **더블 S+MDS v7 룰 엔진**, **과거 캔들 백테스트**, **AI 맥락 필터**(Gemini가 M1 후보를 PASS/REJECT), **실시간 모의매매 루프**(`/api/paper`), **킬스위치**가 있습니다. GitHub Pages에는 쓰이지 않습니다 — `backend/README.md` 참고.
 
+## ✨ 픽셀 오피스 ◆ 정밀 분석 = Gemini AI 13인 (2026-11-20)
+
+- `◆ 정밀 분석`을 누르면 브라우저 안 규칙 대신 **진짜 Gemini AI 13인 팀**(애널리스트 4 · 리서치룸 BULL/BEAR 2라운드 · ACE 결재 · 리스크 위원회 3 · PM 승인)이 회의하고 판정합니다. 말풍선·Agent Console·최종 판정이 모두 Gemini가 쓴 한국어입니다.
+- 키는 **Cloudflare Worker Secret `GEMINI_API_KEY`** 에만 있습니다 — 브라우저 JS·저장소에 키가 없습니다. `lite/gemini.js`가 `https://pixel-global.jooyon124.workers.dev/ai-analyze`(POST)만 호출합니다. Worker·배포 방법은 `worker/README.md`.
+- **숫자는 AI가 아니라 규칙이 정합니다.** Gemini는 방향·확신도·근거를 말하고, 진입·손절·목표·청산가는 `lite/brain.js`가 다시 계산합니다. 그래서 손절이 청산가 안쪽인지 보는 리스크 게이트와 화면 스키마가 그대로 유지됩니다(게이트 강등 시 HOLD).
+- 판정 패널 머리에 **`✨ Gemini AI · 3.5 flash lite`** / **`체험 규칙 B안`** 배지로 이번 판정의 출처를 표시합니다.
+- 응답 실패·무료 한도(429)·연결 오류면 **체험 규칙(B안)으로 자동 폴백**해 화면이 멈추지 않습니다. 프론트는 15초 쿨다운, 시연(`?kiosk=1`)·`?ai=0`에서는 AI를 부르지 않습니다.
+- 모델 폴백 `gemini-3.5-flash-lite` → `gemini-3.1-flash-lite`(실사이트에서 3.1로 자동 전환되는 것까지 확인). 응답 2~4초.
+
 ## 글로벌 시황
 
 - `[사무실]`·`[트레이딩]` 탭 — 화면 맨 위에 한 줄 전광판: NQ 선물 · ES 선물 · DXY · 원/달러 · 김프 · BTC 도미넌스 · 공포탐욕
