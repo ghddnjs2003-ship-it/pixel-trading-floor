@@ -424,6 +424,9 @@ html.m .pt-hero b { font-size: 22px; }
 
 /* 데스크톱에서는 휴대폰 전용 요소를 숨긴다 */
 #caption, #m-verdict { display: none; }
+/* 📄 리포트 — 판정 패널이 숨는 휴대폰 화면에서만 보인다 */
+#mv-report-btn { display: none; }
+html.m #mv-report-btn { display: inline-block; }
 
 /* 데스크톱인데 화면이 낮으면(노트북 등) 위쪽 차트를 줄여 사무실 높이를 확보한다 */
 @media (max-height: 1000px) {
