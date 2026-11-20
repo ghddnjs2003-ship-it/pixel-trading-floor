@@ -1887,3 +1887,24 @@ body.whip-mode .bubble { pointer-events: none; } /* 채찍 든 동안 모달 클
 /* 채찍 맞고 터보 노동: 더 빨리 바운스 + 모니터 과열 */
 .desk.turbo .sprite { animation: bounce .16s steps(2) infinite !important; }
 .desk.turbo::after { animation: monitor-glow .22s steps(2) infinite alternate !important; }
+
+/* ✨ 판정 출처 배지 (2026-11-20) — Gemini AI가 판정했는지 체험 규칙인지 */
+.dp-source {
+  font-size: 9px;
+  letter-spacing: .5px;
+  padding: 2px 6px;
+  border: 2px solid #000;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, .06);
+  color: var(--ink-dim);
+  white-space: nowrap;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dp-source.hidden { display: none; }
+.dp-source.live {
+  color: #1a1a24;
+  background: var(--gold);
+  text-shadow: none;
+}

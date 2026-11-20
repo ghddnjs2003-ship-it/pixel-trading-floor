@@ -212,6 +212,9 @@
     ctx.engine = win.LiteEngine.createEngine({
       bus, paper,
       data: { resolveSymbol: win.LiteData.resolveSymbol, fetchSnapshot: (sym) => win.LiteData.fetchSnapshot(sym, { fetch: ctx.fetchImpl }) },
+      // ?ai=0 이거나 LITE_CONFIG.gemini === false 면 규칙만 쓴다(시연 화면은 아래에서 kiosk로 꺼진다)
+      gemini: win.LiteGemini && (win.LITE_CONFIG || {}).gemini !== false
+        && new URLSearchParams(win.location.search).get('ai') !== '0' ? win.LiteGemini.create() : null,
     });
     const api = install(win, ctx);
     if (kiosk) {

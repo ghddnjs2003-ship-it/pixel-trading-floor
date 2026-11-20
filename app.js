@@ -596,6 +596,8 @@ function resetDecision() {
   if (vb) vb.classList.add('hidden');
   const rb = qs('#dp-risk');
   if (rb) rb.className = 'hidden';
+  const src = qs('#dp-source');
+  if (src) { src.textContent = ''; src.classList.add('hidden'); src.classList.remove('live'); }
   resetScalp();
 }
 
@@ -625,6 +627,21 @@ function applyScalp(scalp) {
   qs('#dp-scalp-target').textContent = scalp.target || '—';
   qs('#dp-scalp-note').textContent = scalp.note || '';
   box.classList.remove('hidden');
+}
+
+// ✨ Gemini AI / 체험 규칙 — 이번 판정을 누가 만들었는지 패널 머리에 표시
+function onAi(ev) {
+  const el = qs('#dp-source');
+  if (!el) return;
+  if (ev && ev.ok) {
+    const label = String(ev.model || 'gemini').replace(/^gemini-/, '').replace(/-/g, ' ');
+    el.textContent = `✨ Gemini AI · ${label}`;
+    el.classList.add('live');
+  } else {
+    el.textContent = '체험 규칙 B안';
+    el.classList.remove('live');
+  }
+  el.classList.remove('hidden');
 }
 
 function onDecision(ev) {
@@ -825,6 +842,7 @@ function handleEvent(ev) {
     case 'position':   onPosition(ev); break;
     case 'scan':       onScan(ev); break;
     case 'decision':   onDecision(ev); break;
+    case 'ai':         onAi(ev); break;
     case 'saved':      toast('리포트 저장됨(클릭해서 열기): ' + shortPath(ev.path), 'ok', '/reports/' + encodeURIComponent(shortPath(ev.path))); break;
     case 'run:error':  toast(ev.message || '오류가 발생했습니다', 'err'); break;
     case 'run:end':    onRunEnd(); break;

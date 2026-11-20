@@ -87,6 +87,9 @@
   function holdWhy(an, short) {
     const p = an.plan;
     const sig = an.sig;
+    if (p.reason === 'AI_HOLD') {
+      return short ? 'AI 관망' : 'Gemini 13인 팀이 진입 근거가 약하다고 보고 관망을 골랐습니다';
+    }
     if (p.reason === 'NO_TREND') {
       const gap = sig.ema50h ? ((sig.price - sig.ema50h) / sig.ema50h) * 100 : null;
       const where = gap == null ? `±${R.trendBandPct}%` : `${gap >= 0 ? '+' : ''}${gap.toFixed(2)}%`;

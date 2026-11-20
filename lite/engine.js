@@ -77,11 +77,14 @@
         }
         // auto는 늘 false — 화면(hq.js)이 auto면 "자동 분석 개시 · AI <모델>" 배너를 띄워 AI 판정처럼 보인다
         emit({ type: 'run:start', symbol: sym.symbol, display: sym.display, mock: false, mode, auto: false, model: '자체 로직' });
-        log('> 데모 버전 — AI 엔진 대신 자체 트레이딩 로직으로 판정합니다 (실제 버전은 13명이 각자 AI로 분석)');
+        log(deps.gemini && !kiosk
+          ? '> 픽셀 트레이딩 플로어 — 13인 팀이 Gemini AI로 분석합니다 (판정은 리스크 규칙 게이트를 거칩니다)'
+          : '> 데모 버전 — AI 엔진 대신 자체 트레이딩 로직으로 판정합니다');
         log(`> 바이낸스 ${sym.display} 시세 요청…`);
         const snap = await deps.data.fetchSnapshot(sym);
-        const an = Brain.analyze(snap, { lev, mode });
-        const T = Script.texts(an, snap);
+        const base = Brain.analyze(snap, { lev, mode });
+        let an = base;
+        let T = null;
         // 전광판 배지: 한국 주식은 "KRX 장 시간 · 무기한은 24H", 나머지(코인·미국 주식·금 무기한)는 24시간 거래
         emit({
           type: 'market', priceLine: Script.priceLine(snap), symbol: sym.symbol, display: sym.display, kind: sym.kind === 'krstock' ? 'krstock' : 'crypto',
@@ -92,6 +95,24 @@
         log(`> ${Script.priceLine(snap)}`);
         for (const l of Script.marketLines(an, snap)) log(`> ${l}`);
         await wait(600);
+
+        // ✨ Gemini AI 13인 분석 — Worker(GEMINI_API_KEY Secret)가 13인 대사와 판정을 돌려준다.
+        //   응답 실패·무료 한도(429)·연타는 여기서 조용히 체험 규칙(B안)으로 넘어간다(화면은 멈추지 않는다).
+        if (deps.gemini && !kiosk && opts.ai !== false) {
+          log('> ✨ Gemini AI 13인 팀에 분석을 요청합니다…');
+          const ai = await deps.gemini.analyze(base, snap, { lev, mode });
+          if (ai && ai.ok) {
+            an = Brain.applyAi(base, ai);
+            T = deps.gemini.texts(Script.texts(an, snap), ai, mode);
+            emit({ type: 'ai', ok: true, model: ai.model, ms: ai.ms });
+            log(`> ✨ Gemini AI(${ai.model}) 응답 ${(Math.round((ai.ms || 0) / 100) / 10).toFixed(1)}초 — 13인 팀 판정 ${an.final.action} ${an.plan.confidence}%`);
+          } else {
+            emit({ type: 'ai', ok: false, code: ai && ai.code });
+            const why = ai && ai.code && ai.code !== 'cooldown' ? ` (${ai.code})` : '';
+            log(`> ⚠ Gemini AI 응답 없음${why} — 체험 규칙(B안)으로 판정합니다`);
+          }
+        }
+        if (!T) T = Script.texts(an, snap);
 
         log('── 1/5 애널리스트 브리핑 · 기술 / 펀더멘털 / 뉴스 / 소셜 ──', 'stage');
         if (mode === 'algo') {

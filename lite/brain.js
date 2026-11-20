@@ -198,6 +198,33 @@
     return { action, bias: side || 'PASS', side, verdict, marginPct: side ? marginPct : 0, downgraded: !!gate.downgrade };
   }
 
+  // ✨ Gemini AI 판정 반영 — 방향·확신도는 AI가 정하고, 진입·손절·목표·청산 숫자는
+  //   규칙이 다시 계산한다. 그래서 리스크 게이트(손절이 청산가 안쪽인지)와 화면 스키마가 그대로 유지된다.
+  function applyAi(an, ai) {
+    const lev = an.lev;
+    const side = ai && ai.action === 'BUY' ? 'LONG' : ai && ai.action === 'SELL' ? 'SHORT' : null;
+    const conf = ai && Number.isFinite(ai.confidence)
+      ? Math.max(0, Math.min(100, Math.round(ai.confidence))) : an.plan.confidence;
+    if (!side) {
+      const lv = levels(an.plan.candidate, an.sig.price, lev);
+      const plan = {
+        ...an.plan, ...lv, side: null, action: 'HOLD', bias: 'PASS', confidence: conf,
+        reason: 'AI_HOLD', hold: true, trial: false, rsiHot: false, pending: { side: an.plan.candidate, ...lv },
+      };
+      const gate = riskGate(plan);
+      const pm = { verdict: 'APPROVE', code: 'HOLD_OK', marginPct: 0 };
+      return { ...an, plan, gate, pm, final: finalize(plan, gate, pm, an.mode), ai: true };
+    }
+    const lv = levels(side, an.sig.price, lev);
+    const plan = {
+      ...an.plan, ...lv, side, action: side === 'LONG' ? 'BUY' : 'SELL', bias: side, candidate: side,
+      confidence: conf, reason: 'AI', hold: false, trial: false, rsiHot: false, pending: null,
+    };
+    const gate = riskGate(plan);
+    const pm = pmReview(plan, an.sig, gate);
+    return { ...an, plan, gate, pm, final: finalize(plan, gate, pm, an.mode), ai: true };
+  }
+
   function analyze(snap, opts = {}) {
     const lev = clampLev(opts.lev);
     const mode = opts.mode === 'algo' ? 'algo' : 'scalp';
@@ -208,5 +235,5 @@
     return { lev, mode, sig, plan, gate, pm, final: finalize(plan, gate, pm, mode) };
   }
 
-  return { RULES, clampLev, fmtPrice, signals, levels, decide, riskGate, pmReview, finalize, analyze };
+  return { RULES, clampLev, fmtPrice, signals, levels, decide, riskGate, pmReview, finalize, analyze, applyAi };
 });
