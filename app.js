@@ -268,7 +268,7 @@ function updateBoard(ev) {
   drawChart(ev.candles);
   updateMarketBadge(ev);
   // 콘솔 상단에 수집 완료를 알리는 합성 로그 (서버가 log 이벤트를 안 보내는 구버전 대비)
-  if (!serverLogs) {
+  if (!serverLogs && !ev.preview) {
     pushLog('sys', `> ${ev.display || ev.symbol} 시세 수신 완료`);
     if (ev.priceLine) pushLog('sys', `> ${ev.priceLine}`);
   }
@@ -794,6 +794,7 @@ function applyVerdict(ev) {
 }
 
 function onRunStart(ev) {
+  if (ev && ev.symbol) lastAnalyzedSymbol = String(ev.symbol);
   setBusy(true);
   AGENT_IDS.forEach(resetBubble);
   resetDecision();
@@ -878,6 +879,48 @@ async function analyze(mode = currentMode) {
     // 202 성공 — 이후 UI 는 SSE 가 구동
   } catch (_) {
     toast('서버에 연결할 수 없습니다', 'err');
+  }
+}
+
+/* 워치리스트 칩 클릭 — 차트·종목명·현재 시세만 바꾼다.
+   Gemini(/ai-analyze) 호출과 13인 정밀 분석·모의 포지션은 건드리지 않는다.
+   분석은 초록 ◆ 정밀 분석 버튼(또는 입력칸 Enter)을 눌렀을 때만 실행된다. */
+let previewSeq = 0;
+let lastAnalyzedSymbol = null; // 마지막 정밀 분석 종목 — 칩으로 다른 종목을 보면 판정 패널을 비운다
+async function previewSymbol(name) {
+  const input = qs('#symbol-input');
+  const raw = String(name || (input && input.value) || '').trim();
+  if (!raw) { toast('심볼을 입력하세요', 'err'); return; }
+  if (input) input.value = raw;                         // 클릭 즉시 입력칸부터 바꾼다
+  const data = window.LITE && window.LITE.data;
+  if (!data || typeof data.resolveSymbol !== 'function' || typeof data.fetchSnapshot !== 'function') {
+    toast('시세를 불러오지 못했습니다 — 잠시 후 다시 시도하세요', 'err');
+    return;
+  }
+  let sym;
+  try { sym = data.resolveSymbol(raw); }
+  catch (e) { toast(e && e.message ? e.message : '종목을 찾지 못했습니다', 'err'); return; }
+  const seq = ++previewSeq;
+  try {
+    const snap = await data.fetchSnapshot(sym);
+    if (seq !== previewSeq) return;                     // 더 나중에 누른 칩이 있으면 이 응답은 버린다
+    const line = (window.LiteScript && typeof window.LiteScript.priceLine === 'function')
+      ? window.LiteScript.priceLine(snap) : '';
+    // 차트(lite/chart.js)·전광판(app.js updateBoard)·실시간 구독(lite/live.js)이 모두 이 이벤트를 받는다
+    if (window.LITE && window.LITE.bus) {
+      window.LITE.bus.emit({
+        type: 'market', preview: true,
+        symbol: snap.symbol, display: snap.display, kind: snap.kind, axis: snap.axis, tf: '5m',
+        priceLine: line,
+        candles: (snap.k5 || []).slice(-144).map((c) => ({ t: c.t, o: c.o, h: c.h, l: c.l, c: c.c })),
+      });
+    }
+    // 다른 종목의 지난 판정(진입·손절·목표)이 새 차트 옆에 남아 있으면 오해한다 — 비운다
+    if (lastAnalyzedSymbol && lastAnalyzedSymbol !== snap.symbol) { resetDecision(); lastAnalyzedSymbol = null; }
+    toast(snap.display + ' 차트 · 현재 시세만 바꿨습니다 — 분석은 ◆ 정밀 분석', 'ok');
+  } catch (e) {
+    if (seq !== previewSeq) return;
+    toast(e && e.message ? e.message : '시세를 받지 못했습니다', 'err');
   }
 }
 
@@ -1291,7 +1334,7 @@ function renderWatchlist(list) {
     return;
   }
   box.innerHTML = list.map((s) =>
-    '<button class="wl-chip" type="button" data-sym="' + esc(s) + '" title="클릭하면 이 심볼로 분석을 시작합니다">' +
+    '<button class="wl-chip" type="button" data-sym="' + esc(s) + '" title="클릭하면 이 심볼로 차트·현재 시세를 바꿉니다 (분석은 ◆ 정밀 분석)">' +
     esc(s) + '</button>'
   ).join('');
 }
@@ -2008,9 +2051,8 @@ function initV2() {
     chips.addEventListener('click', (e) => {
       const b = e.target.closest('.wl-chip');
       if (!b || !b.dataset.sym) return;
-      const input = qs('#symbol-input');
-      if (input) input.value = b.dataset.sym;
-      analyze();
+      // 정밀 분석은 ◆ 버튼을 눌렀을 때만 — 칩은 차트·시세만 바꾼다
+      previewSymbol(b.dataset.sym);
     });
   }
 
