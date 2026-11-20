@@ -120,6 +120,7 @@ function aiSystem(c) {
     '[말투]',
     '- bubble은 40자 이내 한 문장(사무실 말풍선), report는 2줄 이내·각 90자 이내로 "[ROLE] " 접두어로 시작.',
     '- 한국어 반말체로 짧고 단호하게. 서로의 의견을 실제로 주고받듯 써라(BULL과 BEAR는 2라운드에서 서로 반박).',
+    '- 각자 자기 말만 한다. bubble·report 앞에 다른 직원 이름표(예: "BEAR1 반박:")를 붙이지 마라 — 화면이 그 사람 말풍선에 그대로 띄운다.',
     '[출력] JSON 하나만 출력한다. 설명·코드블록·머리말 금지.',
     `{"agents":{${schema}},"verdict":{"action":"BUY|SELL|HOLD","confidence":0-100,"rationale":"핵심 근거 한 문장","nextCondition":"관망일 때 다시 볼 조건 한 문장"}}`,
   ].join('\n');
