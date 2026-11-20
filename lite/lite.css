@@ -270,6 +270,30 @@ html.trading-view #trade-page { position: fixed; inset: 54px 0 0; z-index: 10000
 .trade-rsi-wrap { display: flex; align-items: stretch; gap: 8px; height: 62px; padding: 4px 10px; border-top: 1px solid #263143; color: #8d99aa; font-size: 9px; }
 .trade-rsi-wrap.hidden { display: none; }
 #trade-rsi { flex: 1; width: 100%; height: 50px; }
+
+/* ── 차트 종류 전환 — 📊 우리 차트(모의 포지션 선·지표) ↔ 📈 트레이딩뷰 공식 위젯 ── */
+.trade-toolbar-main { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.trade-chart-src { display: flex; flex: none; align-items: center; gap: 4px; }
+.trade-chart-src button {
+  padding: 6px 9px; color: #95a1b3; background: #131b27; border: 1px solid #303b4e; border-radius: 3px;
+  cursor: pointer; font-size: 10px; white-space: nowrap;
+}
+.trade-chart-src button:hover { color: #cdd8e6; border-color: #46566e; }
+.trade-chart-src button.active { color: #eaf6f0; background: #1a3a2f; border-color: #2a715b; }
+.trade-tv { position: absolute; inset: 0; z-index: 4; display: none; overflow: hidden; background: #0b0e13; }
+#trade-page[data-csource="tv"] .trade-tv { display: block; }
+#trade-tv-chart, #trade-tv-chart > div, #trade-tv-chart iframe { width: 100%; height: 100%; }
+#trade-tv-note {
+  position: absolute; inset: 0; display: grid; place-items: center; padding: 12px;
+  color: #8d99aa; background: rgba(11, 14, 19, .92); font-size: 12px; text-align: center;
+}
+#trade-tv-note.hidden { display: none; }
+/* 트레이딩뷰 위젯이 켜지면 우리 차트 전용 조작부는 감춘다 (위젯 안에 같은 기능이 있다) */
+#trade-page[data-csource="tv"] .trade-indicators,
+#trade-page[data-csource="tv"] .trade-rsi-wrap,
+#trade-page[data-csource="tv"] #trade-latest,
+#trade-page[data-csource="tv"] #trade-history-status,
+#trade-page[data-csource="tv"] #trade-chart-message { display: none; }
 .trade-orders-panel { display: flex; flex-direction: column; overflow: hidden; }
 .trade-subtabs { display: flex; gap: 16px; height: 40px; padding: 0 12px; border-bottom: 1px solid #263143; }
 .trade-subtabs button { position: relative; color: #8f9bad; background: none; border: 0; cursor: pointer; font-size: 11px; }
@@ -381,6 +405,10 @@ html.trading-view #trade-page { position: fixed; inset: 54px 0 0; z-index: 10000
   .trade-indicators { justify-content: flex-start; gap: 6px 10px; }
   .trade-frame-tabs { gap: 4px; }
   .trade-frame-tabs button { min-width: 44px; min-height: 34px; padding: 5px 9px; }
+  .trade-toolbar-main { width: 100%; gap: 5px; }
+  .trade-chart-src { width: 100%; gap: 4px; }
+  .trade-chart-src button { flex: 1 1 0; min-width: 0; min-height: 34px; padding: 5px 8px; font-size: 10px; }
+  .trade-tv { border-top: 1px solid #263143; }
 
   .trade-ticket-head, .trade-order-types, .trade-order-summary, #trade-order-error,
   .trade-actions, .trade-disclaimer, .trade-risk-fields, .trade-field-wide { grid-column: 1 / -1; }

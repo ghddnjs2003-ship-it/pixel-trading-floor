@@ -23,6 +23,7 @@
     ['ma20', 'MA20'], ['ma50', 'MA50'], ['ema20', 'EMA20'],
     ['bb', '볼린저'], ['volume', '거래량'], ['rsi', 'RSI'],
   ];
+  const CHART_SOURCE_KEY = 'pixel-lite-chart-source-v1';
   const fmt = (n, digits = 2) => Number.isFinite(Number(n))
     ? Number(n).toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })
     : '—';
@@ -43,6 +44,7 @@
     marginMode: 'ISOLATED', indicators: new Set(['ma20', 'ma50', 'volume']),
     chart: { visibleCount: 100, rightTime: null, drag: null, loadingOlder: false, exhausted: false },
     book: { bids: new Map(), asks: new Map() }, orderSide: 'LONG', latestDecision: null, mobileView: 'chart',
+    chartSource: readChartSource(),
   };
 
   const topbar = $('#topbar');
@@ -83,10 +85,13 @@
       <main class="trade-main">
         <section class="trade-chart-panel">
           <div class="trade-chart-toolbar">
-            <div class="trade-frame-tabs" id="trade-frames">${FRAMES.map((f) => `<button type="button" data-frame="${f.key}" class="${f.key === state.frame.key ? 'active' : ''}">${f.label}</button>`).join('')}</div>
+            <div class="trade-toolbar-main">
+              <div class="trade-chart-src" id="trade-chart-src" role="group" aria-label="차트 종류"><button type="button" data-csrc="lite" class="active" aria-pressed="true">📊 우리 차트</button><button type="button" data-csrc="tv" aria-pressed="false">📈 트레이딩뷰</button></div>
+              <div class="trade-frame-tabs" id="trade-frames">${FRAMES.map((f) => `<button type="button" data-frame="${f.key}" class="${f.key === state.frame.key ? 'active' : ''}">${f.label}</button>`).join('')}</div>
+            </div>
             <div class="trade-indicators" id="trade-indicators">${OPTIONS.map(([key, label]) => `<label><input type="checkbox" data-indicator="${key}"${state.indicators.has(key) ? ' checked' : ''}>${label}</label>`).join('')}</div>
           </div>
-          <div class="trade-chart-wrap"><canvas id="trade-chart" aria-label="실시간 캔들 차트"></canvas><div id="trade-chart-message" role="status">Bybit 캔들을 불러오는 중…</div><span id="trade-history-status" role="status" aria-live="polite"></span><button id="trade-latest" type="button" class="hidden">최신으로</button></div>
+          <div class="trade-chart-wrap"><canvas id="trade-chart" aria-label="실시간 캔들 차트"></canvas><div id="trade-chart-message" role="status">Bybit 캔들을 불러오는 중…</div><span id="trade-history-status" role="status" aria-live="polite"></span><button id="trade-latest" type="button" class="hidden">최신으로</button><div id="trade-tv" class="trade-tv"><div id="trade-tv-chart"></div><div id="trade-tv-note" role="status">트레이딩뷰 차트를 불러오는 중…</div></div></div>
           <div id="trade-rsi-wrap" class="trade-rsi-wrap hidden"><span>RSI(14)</span><canvas id="trade-rsi" aria-label="RSI 14 보조지표"></canvas></div>
         </section>
         <section class="trade-orders-panel">
@@ -123,6 +128,8 @@
     </div>
     <footer class="trade-account-footer"><span>모의 계좌</span><span>잔고 <b id="trade-footer-balance">—</b> USDT</span><span>평가 자산 <b id="trade-footer-equity">—</b> USDT</span><span>미실현 손익 <b id="trade-footer-pnl">—</b> USDT</span><span>사용 가능 <b id="trade-footer-available">—</b> USDT</span></footer>`;
   document.body.appendChild(page);
+  page.dataset.csource = state.chartSource;
+  if (state.chartSource === 'tv') syncChartSourceButtons();
 
   // 휴대폰: 한 번에 한 화면 — 차트 · 주문 · 호가 · 포지션 (넓은 화면은 탭을 숨기고 세 칸을 함께 보여 준다)
   const PANE_SELECTORS = { chart: '.trade-chart-panel', order: '.trade-ticket', book: '.trade-orderbook', positions: '.trade-orders-panel' };
@@ -153,6 +160,11 @@
   state.latestDecision = readStoredDecision();
   window.LITE.latestDecision = state.latestDecision;
   renderDecisionBanner();
+
+  $('#trade-chart-src').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-csrc]');
+    if (button && button.dataset.csrc !== state.chartSource) setChartSource(button.dataset.csrc);
+  });
 
   $('#trade-coin').addEventListener('change', (event) => {
     state.symbol = `${event.target.value}USDT`;
@@ -323,6 +335,126 @@
     }
   }
 
+  // ===== 차트 종류 전환: 📊 우리 차트(모의 포지션 선·지표) ↔ 📈 트레이딩뷰 공식 위젯 =====
+  const tv = { widget: null, script: null };
+  // 위젯은 거래소 심볼을 따로 쓴다 — 바이비트 무기한(BYBIT:BTCUSDT.P), 미국 주식은 NASDAQ
+  const TV_STOCKS = {
+    NVDA: 'NASDAQ:NVDA', AAPL: 'NASDAQ:AAPL', MSFT: 'NASDAQ:MSFT', TSLA: 'NASDAQ:TSLA', AMZN: 'NASDAQ:AMZN',
+    GOOGL: 'NASDAQ:GOOGL', META: 'NASDAQ:META', AMD: 'NASDAQ:AMD', COIN: 'NASDAQ:COIN', MSTR: 'NASDAQ:MSTR',
+    SPY: 'AMEX:SPY', QQQ: 'NASDAQ:QQQ', TQQQ: 'NASDAQ:TQQQ',
+  };
+  const TV_INTERVALS = { '1m': '1', '3m': '3', '5m': '5', '15m': '15', '30m': '30', '1H': '60', '4H': '240', '1D': 'D', '1W': 'W' };
+
+  function readChartSource() {
+    try {
+      return localStorage.getItem(CHART_SOURCE_KEY) === 'tv' ? 'tv' : 'lite';
+    } catch (error) {
+      return 'lite';
+    }
+  }
+
+  function tvSymbol(symbol) {
+    const code = String(symbol || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (!code) return 'BYBIT:BTCUSDT.P';
+    if (TV_STOCKS[code]) return TV_STOCKS[code];
+    return `BYBIT:${code.replace(/USDT$/, '')}USDT.P`;
+  }
+
+  function setChartSource(source) {
+    const next = source === 'tv' ? 'tv' : 'lite';
+    state.chartSource = next;
+    page.dataset.csource = next;
+    syncChartSourceButtons();
+    try {
+      localStorage.setItem(CHART_SOURCE_KEY, next);
+    } catch (error) {
+      // 저장이 막혀도 이번 화면에서는 동작한다
+    }
+    if (next === 'tv') mountTradingView();
+    else {
+      clearTradingView();
+      requestAnimationFrame(drawChart);
+    }
+  }
+
+  function syncChartSourceButtons() {
+    $$('#trade-chart-src [data-csrc]').forEach((button) => {
+      const on = button.dataset.csrc === state.chartSource;
+      button.classList.toggle('active', on);
+      button.setAttribute('aria-pressed', String(on));
+    });
+  }
+
+  function loadTvScript() {
+    if (window.TradingView && typeof window.TradingView.widget === 'function') return Promise.resolve();
+    if (tv.script) return tv.script;
+    tv.script = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://s3.tradingview.com/tv.js';
+      script.async = true;
+      script.onload = () => (window.TradingView && typeof window.TradingView.widget === 'function'
+        ? resolve()
+        : reject(new Error('TradingView 위젯을 읽지 못했습니다.')));
+      script.onerror = () => { tv.script = null; reject(new Error('TradingView 스크립트를 불러오지 못했습니다.')); };
+      document.head.appendChild(script);
+    });
+    return tv.script;
+  }
+
+  function clearTradingView() {
+    const host = $('#trade-tv-chart');
+    if (host) host.innerHTML = '';
+    tv.widget = null;
+  }
+
+  function mountTradingView() {
+    if (state.view !== 'trading' || state.chartSource !== 'tv') return;
+    const host = $('#trade-tv-chart');
+    const note = $('#trade-tv-note');
+    if (!host || !note) return;
+    note.textContent = '트레이딩뷰 차트를 불러오는 중…';
+    note.classList.remove('hidden');
+    loadTvScript().then(() => {
+      if (state.chartSource !== 'tv' || state.view !== 'trading') return;
+      host.innerHTML = '';
+      tv.widget = null;
+      // 위젯은 칸의 실제 크기를 재고 그리므로, 화면에 올린 다음 프레임에 만든다
+      requestAnimationFrame(() => {
+        if (state.chartSource !== 'tv' || state.view !== 'trading') return;
+        try {
+          tv.widget = new window.TradingView.widget({
+            container_id: 'trade-tv-chart',
+            symbol: tvSymbol(state.symbol),
+            interval: TV_INTERVALS[state.frame.key] || '15',
+            theme: 'dark',
+            style: '1',
+            locale: 'kr',
+            timezone: 'Asia/Seoul',
+            toolbar_bg: '#10151e',
+            backgroundColor: '#0b0e13',
+            gridColor: 'rgba(38,49,67,.55)',
+            autosize: true,
+            hide_top_toolbar: false,
+            hide_side_toolbar: false,
+            allow_symbol_change: false,
+            save_image: false,
+            withdateranges: true,
+            details: false,
+            hotlist: false,
+            enable_publishing: false,
+          });
+          const iframe = host.querySelector('iframe');
+          if (iframe) iframe.addEventListener('load', () => note.classList.add('hidden'));
+          setTimeout(() => { if (state.chartSource === 'tv') note.classList.add('hidden'); }, 6000);
+        } catch (error) {
+          note.textContent = '트레이딩뷰 위젯을 띄우지 못했어요. 새로고침 후 다시 시도해 주세요.';
+        }
+      });
+    }).catch(() => {
+      note.textContent = '트레이딩뷰 위젯을 불러오지 못했어요. 인터넷 연결이나 광고 차단 설정을 확인해 주세요.';
+    });
+  }
+
   function readStoredDecision() {
     try {
       const raw = localStorage.getItem(DECISION_KEY);
@@ -426,6 +558,8 @@
 
   async function loadMarket() {
     if (state.view !== 'trading') return;
+    // 차트 종류가 트레이딩뷰면 지금 종목·시간봉으로 공식 위젯을 다시 띄운다
+    if (state.chartSource === 'tv') mountTradingView();
     const seq = ++state.requestSeq;
     state.chart.loadingOlder = false;
     state.chart.exhausted = false;
@@ -858,6 +992,8 @@
   }
 
   function drawChart() {
+    // 트레이딩뷰 위젯이 차트 칸을 쓰는 동안은 우리 캔버스를 다시 그리지 않는다
+    if (state.chartSource === 'tv') return;
     const canvas = $('#trade-chart');
     if (!canvas || document.documentElement.classList.contains('hidden')) return;
     const box = canvas.getBoundingClientRect();
