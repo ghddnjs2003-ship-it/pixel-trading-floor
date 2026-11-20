@@ -915,8 +915,13 @@ async function previewSymbol(name) {
         candles: (snap.k5 || []).slice(-144).map((c) => ({ t: c.t, o: c.o, h: c.h, l: c.l, c: c.c })),
       });
     }
-    // 다른 종목의 지난 판정(진입·손절·목표)이 새 차트 옆에 남아 있으면 오해한다 — 비운다
-    if (lastAnalyzedSymbol && lastAnalyzedSymbol !== snap.symbol) { resetDecision(); lastAnalyzedSymbol = null; }
+    // 다른 종목의 지난 판정(진입·손절·목표, 판정 말풍선)이 새 차트 옆에 남아 있으면 오해한다 — 판정 패널과 말풍선만 비운다
+    // (분석 로그·모의 포지션은 그대로 둔다 — 지난 기록은 오른쪽 콘솔에 남는다)
+    if (lastAnalyzedSymbol && lastAnalyzedSymbol !== snap.symbol) {
+      resetDecision();
+      AGENT_IDS.forEach(resetBubble);
+      lastAnalyzedSymbol = null;
+    }
     toast(snap.display + ' 차트 · 현재 시세만 바꿨습니다 — 분석은 ◆ 정밀 분석', 'ok');
   } catch (e) {
     if (seq !== previewSeq) return;
