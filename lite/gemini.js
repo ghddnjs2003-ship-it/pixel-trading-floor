@@ -18,9 +18,9 @@
 
   const num = (v) => (Number.isFinite(+v) ? +v : null);
 
-  function payload(an, snap) {
+  function payload(an, snap, ctx) {
     const s = an.sig;
-    return {
+    const body = {
       market: {
         symbol: snap.symbol, display: snap.display, price: snap.price,
         change24hPct: num(snap.change24hPct), trend: s.trend, ema50h: s.ema50h,
@@ -41,6 +41,19 @@
         },
       },
     };
+    // 내 책·복기·국면·일정·고래·헤드라인 — Worker가 필요한 필드만 골라 Gemini 프롬프트에 넣는다
+    if (ctx) {
+      body.context = {
+        account: ctx.account || null,
+        lessons: Array.isArray(ctx.lessons) ? ctx.lessons.slice(0, 4) : [],
+        regime: ctx.regime || null,
+        calendar: Array.isArray(ctx.calendar) ? ctx.calendar.slice(0, 3) : [],
+        whales: Array.isArray(ctx.whales) ? ctx.whales.slice(0, 3) : [],
+        headlines: Array.isArray(ctx.headlines) ? ctx.headlines.slice(0, 3) : [],
+        inputs: ctx.inputs || null,
+      };
+    }
+    return body;
   }
 
   function create(opts = {}) {
@@ -62,7 +75,7 @@
         const res = await fetchImpl(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload(an, snap)),
+          body: JSON.stringify(payload(an, snap, o.ctx)),
           signal: ctrl ? ctrl.signal : undefined,
         });
         const body = await res.json().catch(() => null);

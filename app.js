@@ -631,15 +631,18 @@ function applyScalp(scalp) {
 }
 
 // ✨ Gemini AI / 체험 규칙 — 이번 판정을 누가 만들었는지 패널 머리에 표시
+//   정직 표기: 브라우저(웹)는 Gemini **1회 호출**이 13역할의 대사를 함께 쓴다(백엔드는 역할별 13회).
 function onAi(ev) {
   const el = qs('#dp-source');
   if (!el) return;
   if (ev && ev.ok) {
     const label = String(ev.model || 'gemini').replace(/^gemini-/, '').replace(/-/g, ' ');
-    el.textContent = `✨ Gemini AI · ${label}`;
+    el.textContent = `✨ Gemini AI 통합 · ${label}`;
+    el.title = 'Gemini 1회 호출이 13역할의 대사를 함께 작성합니다(역할별 13회 호출은 백엔드 13인 분석). 숫자(진입·손절·목표)는 규칙이 계산합니다.';
     el.classList.add('live');
   } else {
     el.textContent = '체험 규칙 B안';
+    el.title = 'Gemini 응답이 없어 규칙 엔진이 판정했습니다.';
     el.classList.remove('live');
   }
   el.classList.remove('hidden');

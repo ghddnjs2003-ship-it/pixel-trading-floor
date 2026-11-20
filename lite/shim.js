@@ -235,6 +235,18 @@
       // ?ai=0 이거나 LITE_CONFIG.gemini === false 면 규칙만 쓴다(시연 화면은 아래에서 kiosk로 꺼진다)
       gemini: win.LiteGemini && (win.LITE_CONFIG || {}).gemini !== false
         && new URLSearchParams(win.location.search).get('ai') !== '0' ? win.LiteGemini.create() : null,
+      // 내 계좌·복기·국면·일정·고래·헤드라인 — 화면에 이미 있는 데이터를 AI 요청에 싣는다
+      context: win.LiteContext ? (o) => win.LiteContext.build({
+        paperSnap: paper.snapshot(),
+        k5: o && o.snap ? o.snap.k5 : null,
+        fng: o && o.snap ? o.snap.fng : null,
+        whaleSnap: (() => {
+          try { return win.LiteWhale && win.LiteWhale.snapshot ? win.LiteWhale.snapshot() : null; } catch (_) { return null; }
+        })(),
+        news: (() => {
+          try { return win.LITE && win.LITE.life && win.LITE.life.news ? win.LITE.life.news() : null; } catch (_) { return null; }
+        })(),
+      }) : null,
     });
     const api = install(win, ctx);
     if (kiosk) {

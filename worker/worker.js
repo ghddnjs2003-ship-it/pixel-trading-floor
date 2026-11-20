@@ -13,7 +13,7 @@ const AI_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
 const AI_KEYS_ALGO = ['taro', 'diana', 'nova', 'vibe', 'bull1', 'bull2', 'bear1', 'bear2', 'ace', 'risky', 'safe', 'neutral', 'pm'];
 const AI_KEYS_SCALP = ['taro', 'vibe', 'blitz', 'guard', 'ace'];
 const AI_ORIGINS = new Set(['https://ghddnjs2003-ship-it.github.io']);
-const AI_MAX_BODY = 12000;
+const AI_MAX_BODY = 24000;
 const AI_RATE = { windowMs: 10 * 60 * 1000, max: 15, gapMs: 2500 };
 const AI_HITS = new Map();
 
@@ -57,6 +57,44 @@ function aiAllow(req) {
 
 const aiNum = (v, lo, hi) => (Number.isFinite(+v) && +v >= lo && +v <= hi ? Math.round(+v * 1e6) / 1e6 : null);
 const aiStr = (v, max = 32) => (typeof v === 'string' ? v.slice(0, max) : '');
+const aiList = (v, n, max) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x.trim()).slice(0, n).map((x) => x.slice(0, max)) : []);
+
+// 내 책·복기·국면·일정·고래·헤드라인 — 프론트가 보낸 것 중 필요한 값만 남긴다(문자열·숫자 제한).
+function aiContext(cx) {
+  if (!cx || typeof cx !== 'object') return null;
+  const acc = cx.account && typeof cx.account === 'object' ? cx.account : null;
+  const reg = cx.regime && typeof cx.regime === 'object' ? cx.regime : null;
+  const inputs = cx.inputs && typeof cx.inputs === 'object' ? cx.inputs : null;
+  const out = {
+    account: acc ? {
+      balance: aiNum(acc.balance, 0, 1e9), equity: aiNum(acc.equity, 0, 1e9),
+      todayPnl: aiNum(acc.todayPnl, -1e9, 1e9), winRate: aiNum(acc.winRate, 0, 100),
+      openCount: Array.isArray(acc.open) ? acc.open.length : 0,
+      open: (Array.isArray(acc.open) ? acc.open : []).slice(0, 3).map((p) => ({
+        symbol: aiStr(p && p.symbol, 16), side: aiStr(p && p.side, 6),
+        entry: aiNum(p && p.entry, 0, 1e12), roePct: aiNum(p && p.roePct, -100000, 100000),
+      })),
+    } : null,
+    lessons: aiList(cx.lessons, 4, 140),
+    regime: reg ? {
+      label: aiStr(reg.label, 20), atrPct: aiNum(reg.atrPct, 0, 100), atrRatio: aiNum(reg.atrRatio, 0, 10),
+      atrPctile: aiNum(reg.atrPctile, 0, 100), trendStrength: aiNum(reg.trendStrength, 0, 100),
+      pos48: aiNum(reg.pos48, 0, 100),
+      fng: reg.fng && Number.isFinite(+reg.fng.value) ? { value: aiNum(reg.fng.value, 0, 100), label: aiStr(reg.fng.label, 24) } : null,
+    } : null,
+    calendar: (Array.isArray(cx.calendar) ? cx.calendar : []).slice(0, 3).map((e) => ({
+      time: aiStr(e && e.time, 12), title: aiStr(e && e.title, 60), impact: aiStr(e && e.impact, 8),
+    })),
+    whales: (Array.isArray(cx.whales) ? cx.whales : []).slice(0, 3).map((w) => ({
+      usd: aiNum(w && w.usd, 0, 1e12), from: aiStr(w && w.from, 16), to: aiStr(w && w.to, 16),
+    })),
+    headlines: aiList(cx.headlines, 3, 90),
+    inputs: inputs ? Object.fromEntries(Object.entries(inputs).slice(0, 8).map(([k, v]) => [aiStr(k, 12), aiStr(String(v), 24)])) : null,
+  };
+  const empty = !out.account && !out.lessons.length && !out.regime && !out.calendar.length
+    && !out.whales.length && !out.headlines.length;
+  return empty ? null : out;
+}
 
 function aiLevels(x) {
   if (!x || typeof x !== 'object') return null;
@@ -97,6 +135,8 @@ function aiCtx(body) {
       ruleConfidence: aiNum(rr.confidence, 0, 100),
       levels: { long: aiLevels(lv.long), short: aiLevels(lv.short) },
     },
+    // 2026-11-20 P0 — 화면에 이미 있는 데이터(내 계좌·복기·국면·일정·고래·헤드라인)
+    context: aiContext(b.context),
   };
 }
 
@@ -119,6 +159,12 @@ function aiSystem(c) {
     '- 규칙이 계산한 levels(long/short)의 진입·손절·목표·청산 숫자는 실제 화면에 쓰이니 그대로 인용해도 된다.',
     '- 손절가가 청산가보다 바깥이면 절대 진입하지 말고 HOLD. 추세가 불명확(FLAT)하거나 RSI 추격 자리면 HOLD 쪽으로 기울여라.',
     '- 확신이 없으면 HOLD가 정답이다. 억지로 BUY/SELL을 만들지 마라.',
+    '[문맥 사용 — 중요]',
+    '- context.account: 내 모의계좌 잔고·보유다. 이미 보유한 종목과 같은 방향의 신규 진입은 HOLD 쪽으로 기울이고, "이미 X 롱 보유 중"이라고 말해라.',
+    '- context.lessons: 최근 청산 복기다. 같은 실수(추세 반대 진입·손절 반복)를 반복하지 말고 근거로 인용해라.',
+    '- context.regime: 변동성·추세·공포탐욕 국면이다. 숫자를 인용해 판단 근거로 써라(예: "ATR%가 0.3, 백분위 12라 4R까지 갈 힘이 약하다").',
+    '- context.calendar·headlines·whales: 이미 수집된 경제일정·헤드라인·고래 입출금이다. 있으면 인용하고, 없으면 없다고 말해라.',
+    '- context.inputs는 어떤 자료를 실제로 읽었는지(읽음/없음)다. "없음"인 자료를 지어내지 마라.',
     '[말투]',
     '- bubble은 40자 이내 한 문장(사무실 말풍선), report는 2줄 이내·각 90자 이내로 "[ROLE] " 접두어로 시작.',
     '- 한국어 반말체로 짧고 단호하게. 서로의 의견을 실제로 주고받듯 써라(BULL과 BEAR는 2라운드에서 서로 반박).',

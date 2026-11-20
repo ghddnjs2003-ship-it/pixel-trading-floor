@@ -170,3 +170,22 @@ def ai_filter_is_veto():
     """AI_FILTER_VETO=on이면 13인 분석의 최종 진입을 필터 REJECT가 HOLD로 내린다(기본 on)."""
     load_env_file()
     return (os.getenv("AI_FILTER_VETO", "on").strip().lower() or "on") not in ("off", "0", "false", "no")
+
+
+# ------------------------------------------------------------------ 판정 리포트·리스크 토론
+
+def get_analysis_options():
+    """13인 분석 운영 옵션 — 리포트 저장 위치와 리스크 교차 토론 라운드 수.
+
+    ORCH_RISK_ROUNDS: 1(기본, 보수→중립→공격 교차 검증) / 2(한 라운드 더 반박)
+    ORCH_REPORTS: off면 리포트를 저장하지 않는다(기본 on, data/reports/)
+    """
+    load_env_file()
+    reports = (os.getenv("ORCH_REPORTS", "on").strip().lower() or "on")
+    report_dir = None if reports in ("off", "0", "false", "no") else \
+        os.getenv("ORCH_REPORT_DIR", str(BACKEND_DIR.parent / "data" / "reports")).strip()
+    try:
+        rounds = int(float(os.getenv("ORCH_RISK_ROUNDS", "1")))
+    except (TypeError, ValueError):
+        rounds = 1
+    return {"report_dir": report_dir or None, "risk_rounds": max(1, min(3, rounds))}

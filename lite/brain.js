@@ -202,18 +202,27 @@
   //   규칙이 다시 계산한다. 그래서 리스크 게이트(손절이 청산가 안쪽인지)와 화면 스키마가 그대로 유지된다.
   function applyAi(an, ai) {
     const lev = an.lev;
-    const side = ai && ai.action === 'BUY' ? 'LONG' : ai && ai.action === 'SELL' ? 'SHORT' : null;
+    const asked = ai && ai.action === 'BUY' ? 'LONG' : ai && ai.action === 'SELL' ? 'SHORT' : null;
+    // 판정 권위 통일(2026-11-20) — AI는 '규칙이 선 자리'의 방향을 뒤집지 않는다.
+    //   규칙 편향(candidate)과 반대 방향을 AI가 고르면 그건 진입이 아니라 의견이다 → 관망.
+    const bias = an.plan.candidate;
+    const side = asked && asked === bias ? asked : null;
+    const flipped = !!(asked && bias && asked !== bias);
     const conf = ai && Number.isFinite(ai.confidence)
       ? Math.max(0, Math.min(100, Math.round(ai.confidence))) : an.plan.confidence;
     if (!side) {
-      const lv = levels(an.plan.candidate, an.sig.price, lev);
+      const lv = levels(bias, an.sig.price, lev);
       const plan = {
         ...an.plan, ...lv, side: null, action: 'HOLD', bias: 'PASS', confidence: conf,
-        reason: 'AI_HOLD', hold: true, trial: false, rsiHot: false, pending: { side: an.plan.candidate, ...lv },
+        reason: flipped ? 'AI_VS_RULE' : 'AI_HOLD', hold: true, trial: false, rsiHot: false,
+        pending: { side: bias, ...lv },
       };
       const gate = riskGate(plan);
       const pm = { verdict: 'APPROVE', code: 'HOLD_OK', marginPct: 0 };
-      return { ...an, plan, gate, pm, final: finalize(plan, gate, pm, an.mode), ai: true };
+      return { ...an, plan, gate, pm, final: finalize(plan, gate, pm, an.mode), ai: true,
+               aiNote: flipped
+                 ? `AI는 ${asked === 'LONG' ? '롱' : '숏'}을 봤지만 규칙 편향은 ${bias === 'LONG' ? '롱' : '숏'} — 방향을 뒤집지 않고 관망합니다`
+                 : null };
     }
     const lv = levels(side, an.sig.price, lev);
     const plan = {
@@ -222,7 +231,7 @@
     };
     const gate = riskGate(plan);
     const pm = pmReview(plan, an.sig, gate);
-    return { ...an, plan, gate, pm, final: finalize(plan, gate, pm, an.mode), ai: true };
+    return { ...an, plan, gate, pm, final: finalize(plan, gate, pm, an.mode), ai: true, aiNote: null };
   }
 
   function analyze(snap, opts = {}) {

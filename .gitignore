@@ -27,3 +27,8 @@ data/ai_cache*.json
 # 모의매매 루프 실행 산출물 — 웹 성적표 모달의 "🤖 30분봉 Gemini AI 모의매매 현황"(lite/paperfeed.js)이 읽으므로 커밋한다.
 #   상태·판단 로그에는 모의 계좌 숫자와 판단 문장만 있다(API 키·실계좌·개인정보 없음). 30분마다 루프가 갱신해 푸시한다.
 backend/state/
+
+# 복기 메모리·판정 리포트 — 실행하면서 계속 자란 산출물(30분 루프가 작업 트리를 흘리지 않도록 git 제외)
+data/paper_memory.jsonl
+data/memory.md
+data/reports/

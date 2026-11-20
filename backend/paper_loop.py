@@ -31,6 +31,8 @@ from typing import Dict, List, Optional, Sequence
 
 from .ai_filter import AIFilter, build_context, nominee_setup, prepare_series
 from .backtest import (INTERVAL_MS, BacktestConfig, _bps, in_session, load_candles, session_hours)
+from .memory import LessonMemory, duplicate_entry, portfolio_context
+from .regime import RegimeGuardConfig, features as regime_features, guard as regime_guard, series as regime_series
 from .risk import KillSwitch
 from .strategy import Engine, Params
 
@@ -72,7 +74,10 @@ class PaperConfig:
     state_path: str = ""
     log_path: str = ""
     killswitch_path: str = ""
+    memory_path: str = ""              # 복기 메모리(청산 1건 = 한 줄)
+    memory_md_path: str = ""
     log_tail: int = 50                 # /api/paper가 돌려줄 최근 로그 줄 수
+    regime_guard: str = "off"          # off | dead | dead+panic — 기본은 끔(실측 없이 켜면 성적을 깎는다)
 
     def __post_init__(self):
         base = Path(self.data_dir)
@@ -82,6 +87,10 @@ class PaperConfig:
             self.log_path = str(base / "paper_log.jsonl")
         if not self.killswitch_path:
             self.killswitch_path = str(base / "paper_killswitch.json")
+        if not self.memory_path:
+            self.memory_path = str(base / "paper_memory.jsonl")
+        if not self.memory_md_path:
+            self.memory_md_path = str(base / "memory.md")
 
     def to_dict(self) -> Dict:
         from dataclasses import asdict
@@ -92,14 +101,22 @@ class PaperLoop:
     """한 번 만들고 tick()을 반복해서 부른다. 상태 파일이 있으면 이어서 돈다(프로세스 재시작 안전)."""
 
     def __init__(self, cfg: Optional[PaperConfig] = None, ai=None, killswitch: Optional[KillSwitch] = None,
-                 fetch=None, now=None):
+                 fetch=None, now=None, memory: Optional[LessonMemory] = None):
         self.cfg = cfg or PaperConfig()
         self.ai = ai                    # None = 설정에서 만든다, False = AI 없이 규칙만(테스트·수동)
         self.fetch = fetch or self._fetch_default
         self.now = now or (lambda: datetime.now(timezone.utc))
         self.killswitch = killswitch or KillSwitch(state_path=self.cfg.killswitch_path)
+        self.memory = memory or LessonMemory(path=self.cfg.memory_path, md_path=self.cfg.memory_md_path)
         self.lock = threading.Lock()
         self._ai_filter = None
+
+    def _regime_guard_cfg(self) -> RegimeGuardConfig:
+        """설정 문자열 → 가드 설정. 기본은 꺼짐 — 켜면 국면이 진입을 막는다."""
+        raw = (self.cfg.regime_guard or "off").strip().lower()
+        if raw in ("", "off", "0", "false"):
+            return RegimeGuardConfig(enabled=False)
+        return RegimeGuardConfig(enabled=True, block_dead="dead" in raw, block_panic="panic" in raw)
 
     # ------------------------------------------------------------------ 준비
     def rule(self):
@@ -296,6 +313,11 @@ class PaperLoop:
             state["scan_count"] = int(state.get("scan_count") or 0) + 1
             state["killswitch"] = self._killswitch_summary()
             self._recompute(state)
+            try:
+                from . import regime as regime_mod
+                regime_label = regime_mod.classify(regime_features(candles, len(candles) - 1))
+            except Exception:
+                regime_label = None
             record = {
                 "ts": self.now().isoformat(timespec="seconds"),
                 "bar": _iso(last["t"]), "bar_kst": _kst(last["t"]),
@@ -309,6 +331,7 @@ class PaperLoop:
                     "label": signal.get("label"), "entry": signal["entry"], "stop": signal["stop"],
                     "target": signal["target"], "reasons": signal.get("reasons")},
                 "filter": verdict,
+                "regime": regime_label,
                 "killswitch": {"ok": entry_ok.get("ok"), "reason": entry_ok.get("reason")},
             }
             state["last_scan"] = {k: record[k] for k in ("ts", "bar", "action", "events", "price")}
@@ -338,6 +361,9 @@ class PaperLoop:
         entry_bar_time = int(last["t"]) + tf_ms
         if not in_session(entry_bar_time, session_hours(cfg)):
             return sig, None, "SKIP", f"세션 밖 진입({self.cfg.session}) — 후보는 기록"
+        held = duplicate_entry(state, self.cfg.symbol, sig["side"])
+        if held:
+            return sig, None, "SKIP", held + " — 후보는 기록"
         if state.get("position"):
             return sig, None, "SKIP", "이미 포지션 보유 중 — 후보는 기록"
         if not entry_ok.get("ok"):
@@ -351,6 +377,13 @@ class PaperLoop:
         if self.killswitch.check_volatility(atr, price):
             return sig, None, "SKIP", "킬스위치: 급변(ATR/가격)"
 
+        # 시장 국면 가드 — 기본은 꺼짐(정보로만 남긴다). 켰을 때만 진입을 막는다.
+        ser = prepare_series(candles)
+        reg_feat = regime_features(candles, int(sig["index"]), ser)
+        guard = regime_guard(sig.get("side"), reg_feat, self._regime_guard_cfg())
+        if not guard.get("ok"):
+            return sig, None, "SKIP", guard.get("reason") or "국면 가드"
+
         # AI 맥락 필터 — 판정만 받는다(사이즈·손절·목표는 규칙 그대로)
         ai = self._filter()
         if ai is None:
@@ -358,9 +391,10 @@ class PaperLoop:
                        "risk_flags": [], "cached": False, "error": None}
         else:
             ai.cfg.symbol = self.cfg.symbol
+            extra = self._ai_extra(candles, state, sig, ser)
             context = build_context(candles, sig, capture.get(sig["index"]),
-                                    prepare_series(candles), ai.cfg, trade_cfg=cfg,
-                                    symbol=self.cfg.symbol)
+                                    ser, ai.cfg, trade_cfg=cfg,
+                                    symbol=self.cfg.symbol, extra=extra)
             verdict = ai.review(sig, context)
         if verdict.get("decision") != "PASS":
             return sig, verdict, "REJECT", f"AI REJECT(loss_prob {verdict.get('loss_prob')}): " \
@@ -395,6 +429,33 @@ class PaperLoop:
         return sig, verdict, "OPEN", (f"모의 {'롱' if side == 'LONG' else '숏'} 진입 {entry:,.2f} · "
                                       f"손절 {stop:,.2f} · 목표 {target:,.2f} ({self.cfg.target_r:g}R) · "
                                       f"리스크 {risk_usd:,.2f} USDT")
+
+    # ------------------------------------------------------------------ AI 문맥
+    def _ai_extra(self, candles: List[Dict], state: Dict, sig: Dict, ser: Optional[Dict] = None) -> Dict:
+        """AI 심사에 함께 넣는 '내 책·교훈·국면' — 값이 없으면 키를 비워 보내지 않는다."""
+        extra: Dict = {}
+        try:
+            ks = self.killswitch.allow_entry()
+            extra["내 계좌"] = portfolio_context(state, ks, symbol=self.cfg.symbol)
+        except Exception:
+            pass
+        try:
+            lines = self.memory.prompt_lines(5, as_of_ms=int(sig.get("time") or 0) or None)
+            if lines:
+                extra["최근 복기 교훈"] = lines
+        except Exception:
+            pass
+        try:
+            from . import regime as regime_mod
+            ser = ser or regime_series(candles)
+            extra["시장 국면"] = regime_mod.summary(
+                candles, int(sig["index"]), ser,
+                global_json=regime_mod.load_json(regime_mod.DATA / "global.json"),
+                calendar=regime_mod.load_json(regime_mod.DATA / "calendar.json"),
+                now_ms=int(candles[int(sig["index"])]["t"]))
+        except Exception:
+            pass
+        return extra
 
     # ------------------------------------------------------------------ 청산
     def _manage(self, state: Dict, candles: List[Dict], tf_ms: int):
@@ -440,6 +501,13 @@ class PaperLoop:
             state["closed"].append(trade)
             state["equity"] = round(equity, 2)
             state["position"] = None
+            try:
+                trade["symbol"] = self.cfg.symbol
+                rec = self.memory.record(trade, symbol=self.cfg.symbol)   # 복기 메모리(P0-2)
+                trade["lesson"] = f"{rec.get('reason_ko')} {rec.get('r')}R → data/memory.md"
+            except Exception as exc:              # 메모리를 못 써도 청산 기록은 남는다
+                trade["lesson"] = None
+                print(f"[paper] 복기 메모리 기록 실패: {exc}", flush=True)
             self.killswitch.record_trade(trade["pnl"], equity)
             return "CLOSE", trade
         return action, None
@@ -467,15 +535,23 @@ class PaperLoop:
 
     def status(self) -> Dict:
         state = self.load_state()
+        try:
+            lessons = self.memory.prompt_lines(5)
+        except Exception:
+            lessons = []
         return {"ok": True, "state": state, "killswitch": self._killswitch_summary(),
                 "rule": state["rule"], "settings": self.cfg.to_dict(),
-                "log": self.tail_log()}
+                "lessons": lessons, "log": self.tail_log()}
 
     def reset(self) -> Dict:
         state = self._blank_state()
         self._recompute(state)
         self.save_state(state)
         self.killswitch.reset()
+        try:
+            self.memory.reset()          # 계좌를 새로 시작하면 복기 메모리도 같이 지운다
+        except Exception:
+            pass
         return state
 
 
@@ -514,6 +590,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--state", default=None, help="상태 파일 경로")
     ap.add_argument("--log", default=None, help="로그 파일 경로")
     ap.add_argument("--killswitch", default=None, help="킬스위치 상태 파일 경로")
+    ap.add_argument("--memory", default=None, help="복기 메모리 파일 경로(기본 data/paper_memory.jsonl)")
+    ap.add_argument("--regime-guard", default="off", choices=["off", "dead", "panic", "dead+panic"],
+                    help="국면 가드(기본 off — 백테스트 근거가 약해 스스로 막지 않는다)")
     ap.add_argument("--status", action="store_true", help="현재 상태만 출력")
     ap.add_argument("--reset", action="store_true", help="모의 계좌 초기화")
     ap.add_argument("--quiet", action="store_true")
@@ -521,7 +600,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     cfg = PaperConfig(symbol=args.symbol, source=args.source, limit=args.limit,
                       state_path=args.state or "", log_path=args.log or "",
-                      killswitch_path=args.killswitch or "")
+                      killswitch_path=args.killswitch or "", memory_path=args.memory or "",
+                      regime_guard=args.regime_guard)
     loop = PaperLoop(cfg, ai=False if args.no_ai else None)
 
     if args.status:

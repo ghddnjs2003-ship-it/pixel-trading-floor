@@ -273,11 +273,15 @@ def _streak(candles: Sequence[Dict], i: int) -> int:
 
 def build_context(candles: Sequence[Dict], signal: Dict, snap: Optional[Dict] = None,
                   series: Optional[Dict] = None, cfg: Optional[FilterConfig] = None,
-                  symbol: str = "BTCUSDT", trade_cfg: Optional[BacktestConfig] = None) -> Dict:
+                  symbol: str = "BTCUSDT", trade_cfg: Optional[BacktestConfig] = None,
+                  extra: Optional[Dict] = None) -> Dict:
     """신호 봉(i)까지의 정보만으로 심사용 문맥을 만든다 — 미래 봉은 읽지 않는다.
 
     trade_cfg를 주면 **체결 모형이 실제로 쓸 목표**를 문맥에 넣는다(예: 후보1의 고정 4R).
     신호 자체의 구조 목표(1.5R 대체)를 그대로 보여주면 AI가 다른 목표를 심사하게 된다.
+
+    extra(내 계좌·복기 교훈·시장 국면)는 **넘길 때만** 문맥에 붙인다. 넘기지 않으면 문맥·캐시 키가
+    예전과 같아서, 2026-11-19에 받아 둔 152건 심사 캐시가 그대로 재생된다(검증 재현성).
     """
     cfg = cfg or FilterConfig()
     i = int(signal["index"])
@@ -410,6 +414,10 @@ def build_context(candles: Sequence[Dict], signal: Dict, snap: Optional[Dict] = 
         },
         "최근봉": [_bar_row(c) for c in recent],
     }
+    if extra:
+        for key, value in extra.items():
+            if value:                          # None·빈 값은 '없음'을 만들지 않고 빼 둔다
+                context[key] = value
     return context
 
 
@@ -496,13 +504,15 @@ class AIFilter:
     # -- 심사 ---------------------------------------------------------------
     def review(self, signal: Dict, context: Optional[Dict] = None,
                candles: Optional[Sequence[Dict]] = None, snap: Optional[Dict] = None,
-               series: Optional[Dict] = None, trade_cfg: Optional[BacktestConfig] = None) -> Dict:
+               series: Optional[Dict] = None, trade_cfg: Optional[BacktestConfig] = None,
+               extra: Optional[Dict] = None) -> Dict:
         if context is None:
             if candles is None:
                 raise ValueError("context 또는 candles가 필요합니다")
             if series is None:
                 series = prepare_series(candles)
-            context = build_context(candles, signal, snap, series, self.cfg, trade_cfg=trade_cfg)
+            context = build_context(candles, signal, snap, series, self.cfg, trade_cfg=trade_cfg,
+                                    symbol=self.cfg.symbol, extra=extra)
         prompt = render_prompt(context)
         key = self.cache_key(context)
         if key in self.cache:

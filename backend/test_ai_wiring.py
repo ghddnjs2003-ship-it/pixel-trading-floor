@@ -35,7 +35,8 @@ class RecordingFilter:
         self.provider = None
         self.calls = 0
 
-    def review(self, signal, context=None, candles=None, snap=None, series=None, trade_cfg=None):
+    def review(self, signal, context=None, candles=None, snap=None, series=None, trade_cfg=None,
+               extra=None):
         self.calls += 1
         return {"decision": self.decision, "loss_prob": self.loss_prob, "reason": "1R 앞 저항",
                 "confidence": 80, "model": "fake", "cached": False, "error": None}

@@ -8,8 +8,9 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
-from .config import ai_filter_enabled, ai_filter_is_veto, get_ai_filter_config, get_port, get_provider_config
-from .orchestrator import AnalysisOrchestrator
+from .config import (ai_filter_enabled, ai_filter_is_veto, get_ai_filter_config, get_analysis_options,
+                    get_port, get_provider_config)
+from .orchestrator import AnalysisOrchestrator, load_paper_portfolio
 from .providers import ChatCompletionProvider
 
 
@@ -48,8 +49,12 @@ def run_analysis(symbol):
     global RUNNING
     try:
         provider = ChatCompletionProvider(get_provider_config())
+        options = get_analysis_options()
         AnalysisOrchestrator(provider, ai_filter=build_ai_filter(),
-                             ai_filter_veto=ai_filter_is_veto()).run(symbol, publish)
+                             ai_filter_veto=ai_filter_is_veto(),
+                             portfolio_loader=load_paper_portfolio,
+                             report_dir=options["report_dir"],
+                             risk_rounds=options["risk_rounds"]).run(symbol, publish)
     except Exception as exc:
         publish({"type": "run:error", "message": str(exc)})
         publish({"type": "log", "kind": "sys", "line": f"> ⚠ 분석 실패: {exc}"})
@@ -100,7 +105,26 @@ def run_live_filter(payload):
 
     ai = AIFilter(get_ai_filter_config())
     snap = engine.capture.get(sig["index"])
-    context = build_context(candles, sig, snap, prepare_series(candles), ai.cfg, trade_cfg=cfg)
+    # 내 책·복기·국면도 같이 심사한다(값이 없으면 키를 비워 보낸다)
+    extra = {}
+    try:
+        from .memory import LessonMemory, portfolio_context
+        state, ks = load_paper_portfolio()
+        if state:
+            extra["내 계좌"] = portfolio_context(state, ks, symbol=ticker)
+        lines = LessonMemory().prompt_lines(5, as_of_ms=int(sig["time"]))
+        if lines:
+            extra["최근 복기 교훈"] = lines
+        from . import regime as regime_mod
+        extra["시장 국면"] = regime_mod.summary(
+            candles, int(sig["index"]), prepare_series(candles),
+            global_json=regime_mod.load_json(regime_mod.DATA / "global.json"),
+            calendar=regime_mod.load_json(regime_mod.DATA / "calendar.json"),
+            now_ms=int(sig["time"]))
+    except Exception as exc:                 # 문맥 보강 실패가 심사를 막지 않게
+        extra["문맥오류"] = str(exc)[:120]
+    context = build_context(candles, sig, snap, prepare_series(candles), ai.cfg, trade_cfg=cfg,
+                            symbol=ticker, extra=extra)
     verdict = ai.review(sig, context)
     return {
         "ok": True, "symbol": ticker, "interval": int(interval), "source": data.get("source"),

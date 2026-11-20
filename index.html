@@ -30,14 +30,14 @@
     })();
   </script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/galmuri/dist/galmuri.css">
-  <link rel="stylesheet" href="style.css?v=14">
-  <link rel="stylesheet" href="hq.css?v=21">
-  <link rel="stylesheet" href="lite/lite.css?v=21">
+  <link rel="stylesheet" href="style.css?v=22">
+  <link rel="stylesheet" href="hq.css?v=22">
+  <link rel="stylesheet" href="lite/lite.css?v=22">
   <link rel="stylesheet" href="lite/screener.css">
   <link rel="stylesheet" href="lite/global.css">
-  <link rel="stylesheet" href="lite/pro.css?v=4">
+  <link rel="stylesheet" href="lite/pro.css?v=22">
   <link rel="stylesheet" href="lite/whale.css">
-  <link rel="stylesheet" href="lite/dashboard.css?v=8">
+  <link rel="stylesheet" href="lite/dashboard.css?v=22">
 </head>
 <body>
   <!-- CRT scanline overlay -->
@@ -273,7 +273,7 @@
             </div>
           </div>
           <div id="decision-panel">
-            <div class="dp-head"><span>최종 판정</span><span id="dp-source" class="dp-source hidden" title="판정을 만든 엔진"></span><button id="dp-card-btn" type="button" title="판정 카드를 PNG로 저장">▣ 카드 저장</button></div>
+            <div class="dp-head"><span>최종 판정</span><span id="dp-source" class="dp-source hidden" title="판정을 만든 엔진"></span><button id="dp-report-btn" type="button" title="최근 판정 리포트 보기·복사·저장">📄 리포트</button><button id="dp-card-btn" type="button" title="판정 카드를 PNG로 저장">▣ 카드 저장</button></div>
             <div id="dp-action">판정 대기 중</div>
             <div id="dp-gauge"><div id="dp-gauge-fill"></div><span id="dp-conf"></span></div>
             <!-- ✂️ 분석과 진입 분리 — 판정이 나와도 자동으로 들어가지 않는다. 이 버튼을 눌렀을 때만 모의 포지션이 열린다 -->
@@ -516,30 +516,32 @@
   <div id="toasts"></div>
 
   <script>window.LITE_CONFIG = {"filesUrl":"https://t.me/+3p7tfRlecK8wYmE9","landingUrl":"../","trialRuns":0,"flyFeed":"https://richtradingschool.github.io/fly-trader/feed.json","engine":new URLSearchParams(location.search).get("engine")==="llm"?"llm":"local"};</script>
-  <script src="lite/indicators.js"></script>
-  <script src="lite/data.js"></script>
-  <script src="lite/brain.js?v=13"></script>
-  <script src="lite/script.js?v=13"></script>
-  <script src="lite/paper.js"></script>
-  <script src="lite/engine.js?v=21"></script>
-  <script src="lite/gemini.js?v=15"></script>
-  <script src="lite/shim.js?v=21"></script>
-  <script src="app.js?v=21"></script>
+  <script src="lite/indicators.js?v=22"></script>
+  <script src="lite/data.js?v=22"></script>
+  <script src="lite/brain.js?v=22"></script>
+  <script src="lite/script.js?v=22"></script>
+  <script src="lite/paper.js?v=22"></script>
+  <script src="lite/engine.js?v=22"></script>
+  <script src="lite/gemini.js?v=22"></script>
+  <script src="lite/context.js?v=22"></script>
+  <script src="lite/shim.js?v=22"></script>
+  <script src="lite/reports.js?v=22"></script>
+  <script src="app.js?v=22"></script>
   <script src="stage.js"></script>
   <script src="qr.js"></script>
-  <script src="hq.js?v=21"></script>
-  <script src="lite/chart.js"></script>
-  <script src="lite/live.js"></script>
-  <script src="lite/life.js"></script>
-  <script src="lite/history.js"></script>
-  <script src="lite/ui.js?v=8"></script>
-  <script src="lite/trading.js?v=8"></script>
-  <script src="lite/screener.js"></script>
-  <script src="lite/global.js?v=9"></script>
-  <script src="lite/ratio.js?v=1"></script>
-  <script src="lite/pro.js?v=10"></script>
-  <script src="lite/paperfeed.js?v=11"></script>
-  <script src="lite/whale.js?v=9"></script>
-  <script src="lite/dashboard.js?v=9"></script>
+  <script src="hq.js?v=22"></script>
+  <script src="lite/chart.js?v=22"></script>
+  <script src="lite/live.js?v=22"></script>
+  <script src="lite/life.js?v=22"></script>
+  <script src="lite/history.js?v=22"></script>
+  <script src="lite/ui.js?v=22"></script>
+  <script src="lite/trading.js?v=22"></script>
+  <script src="lite/screener.js?v=22"></script>
+  <script src="lite/global.js?v=22"></script>
+  <script src="lite/ratio.js?v=22"></script>
+  <script src="lite/pro.js?v=22"></script>
+  <script src="lite/paperfeed.js?v=22"></script>
+  <script src="lite/whale.js?v=22"></script>
+  <script src="lite/dashboard.js?v=22"></script>
 </body>
 </html>

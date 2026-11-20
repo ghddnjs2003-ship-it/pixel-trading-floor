@@ -87,7 +87,7 @@
         // auto는 늘 false — 화면(hq.js)이 auto면 "자동 분석 개시 · AI <모델>" 배너를 띄워 AI 판정처럼 보인다
         emit({ type: 'run:start', symbol: sym.symbol, display: sym.display, mock: false, mode, auto: false, model: '자체 로직' });
         log(deps.gemini && !kiosk
-          ? '> 픽셀 트레이딩 플로어 — 13인 팀이 Gemini AI로 분석합니다 (판정은 리스크 규칙 게이트를 거칩니다)'
+          ? '> 픽셀 트레이딩 플로어 — Gemini AI가 13역할의 대사를 한 번에 작성합니다 (판정은 리스크 규칙 게이트를 거칩니다)'
           : '> 데모 버전 — AI 엔진 대신 자체 트레이딩 로직으로 판정합니다');
         // 판정 출처 배지 — Gemini를 쓰지 않는 실행(시연·?ai=0)은 처음부터 '체험 규칙'으로 표시
         if (!(deps.gemini && !kiosk && opts.ai !== false)) emit({ type: 'ai', ok: false, code: 'rule' });
@@ -96,6 +96,7 @@
         const base = Brain.analyze(snap, { lev, mode });
         let an = base;
         let T = null;
+        let aiCtx = null;
         // 전광판 배지: 한국 주식은 "KRX 장 시간 · 무기한은 24H", 나머지(코인·미국 주식·금 무기한)는 24시간 거래
         emit({
           type: 'market', priceLine: Script.priceLine(snap), symbol: sym.symbol, display: sym.display, kind: sym.kind === 'krstock' ? 'krstock' : 'crypto',
@@ -110,14 +111,20 @@
         // ✨ Gemini AI 13인 분석 — Worker(GEMINI_API_KEY Secret)가 13인 대사와 판정을 돌려준다.
         //   응답 실패·무료 한도(429)·연타·연결 오류는 여기서 조용히 체험 규칙(B안)으로 넘어간다(화면은 멈추지 않는다).
         if (deps.gemini && !kiosk && opts.ai !== false) {
-          log('> ✨ Gemini AI 13인 팀에 분석을 요청합니다…');
+          log('> ✨ Gemini AI에 13역할 통합 브리핑을 요청합니다…');
           try {
-            const ai = await deps.gemini.analyze(base, snap, { lev, mode });
+            // 내 계좌·복기·국면·일정·고래·헤드라인을 함께 보낸다(화면에 이미 있는 데이터)
+            let ctx = null;
+            try { ctx = deps.context ? deps.context({ snap, an: base }) : null; } catch (_) { ctx = null; }
+            const ai = await deps.gemini.analyze(base, snap, { lev, mode, ctx });
             if (ai && ai.ok) {
               an = Brain.applyAi(base, ai);
               T = deps.gemini.texts(Script.texts(an, snap), ai, mode);
               emit({ type: 'ai', ok: true, model: ai.model, ms: ai.ms });
-              log(`> ✨ Gemini AI(${ai.model}) 응답 ${(Math.round((ai.ms || 0) / 100) / 10).toFixed(1)}초 — 13인 팀 판정 ${an.final.action} ${an.plan.confidence}%`);
+              if (an.aiNote) log(`> ⚠ ${an.aiNote}`);
+              log(`> ✨ Gemini AI(${ai.model}) 응답 ${(Math.round((ai.ms || 0) / 100) / 10).toFixed(1)}초 — AI 판정 ${an.final.action} ${an.plan.confidence}%`
+                + (ctx && ctx.inputs ? ` · 문맥 ${Object.keys(ctx.inputs).filter((k) => ctx.inputs[k] !== '없음').length}/6` : ''));
+              aiCtx = ctx;
             } else {
               emit({ type: 'ai', ok: false, code: ai && ai.code });
               const why = ai && ai.code && ai.code !== 'cooldown' ? ` (${ai.code})` : '';
@@ -176,6 +183,12 @@
         if (mode === 'algo') {
           dec.verdict = final.verdict;
           dec.sizing = T.pmSizing;
+        }
+        if (an.aiNote) dec.aiNote = an.aiNote;
+        if (aiCtx) {
+          dec.context = { inputs: aiCtx.inputs, regime: aiCtx.regime ? aiCtx.regime.label : null,
+            account: aiCtx.account ? { balance: aiCtx.account.balance, openCount: aiCtx.account.open.length } : null,
+            lessons: aiCtx.lessons ? aiCtx.lessons.slice(0, 2) : null };
         }
         dec.rr = gate.rr;
         dec.riskOk = gate.ok;
