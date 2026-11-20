@@ -223,6 +223,8 @@
     }
     const btn = doc.getElementById('dp-report-btn');
     if (btn) btn.addEventListener('click', () => open(win));
+    const mbtn = doc.getElementById('mv-report-btn');
+    if (mbtn) mbtn.addEventListener('click', () => open(win));   // 휴대폰 레이아웃
     return { open: () => open(win), list: () => read(win), save: (rep) => save(win, rep) };
   }
 
