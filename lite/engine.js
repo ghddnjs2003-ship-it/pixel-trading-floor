@@ -97,19 +97,24 @@
         await wait(600);
 
         // ✨ Gemini AI 13인 분석 — Worker(GEMINI_API_KEY Secret)가 13인 대사와 판정을 돌려준다.
-        //   응답 실패·무료 한도(429)·연타는 여기서 조용히 체험 규칙(B안)으로 넘어간다(화면은 멈추지 않는다).
+        //   응답 실패·무료 한도(429)·연타·연결 오류는 여기서 조용히 체험 규칙(B안)으로 넘어간다(화면은 멈추지 않는다).
         if (deps.gemini && !kiosk && opts.ai !== false) {
           log('> ✨ Gemini AI 13인 팀에 분석을 요청합니다…');
-          const ai = await deps.gemini.analyze(base, snap, { lev, mode });
-          if (ai && ai.ok) {
-            an = Brain.applyAi(base, ai);
-            T = deps.gemini.texts(Script.texts(an, snap), ai, mode);
-            emit({ type: 'ai', ok: true, model: ai.model, ms: ai.ms });
-            log(`> ✨ Gemini AI(${ai.model}) 응답 ${(Math.round((ai.ms || 0) / 100) / 10).toFixed(1)}초 — 13인 팀 판정 ${an.final.action} ${an.plan.confidence}%`);
-          } else {
-            emit({ type: 'ai', ok: false, code: ai && ai.code });
-            const why = ai && ai.code && ai.code !== 'cooldown' ? ` (${ai.code})` : '';
-            log(`> ⚠ Gemini AI 응답 없음${why} — 체험 규칙(B안)으로 판정합니다`);
+          try {
+            const ai = await deps.gemini.analyze(base, snap, { lev, mode });
+            if (ai && ai.ok) {
+              an = Brain.applyAi(base, ai);
+              T = deps.gemini.texts(Script.texts(an, snap), ai, mode);
+              emit({ type: 'ai', ok: true, model: ai.model, ms: ai.ms });
+              log(`> ✨ Gemini AI(${ai.model}) 응답 ${(Math.round((ai.ms || 0) / 100) / 10).toFixed(1)}초 — 13인 팀 판정 ${an.final.action} ${an.plan.confidence}%`);
+            } else {
+              emit({ type: 'ai', ok: false, code: ai && ai.code });
+              const why = ai && ai.code && ai.code !== 'cooldown' ? ` (${ai.code})` : '';
+              log(`> ⚠ Gemini AI 응답 없음${why} — 체험 규칙(B안)으로 판정합니다`);
+            }
+          } catch (e) {
+            emit({ type: 'ai', ok: false, code: 'client_error' });
+            log('> ⚠ Gemini AI 연결 오류 — 체험 규칙(B안)으로 판정합니다');
           }
         }
         if (!T) T = Script.texts(an, snap);

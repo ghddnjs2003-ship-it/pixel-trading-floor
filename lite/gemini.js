@@ -86,7 +86,7 @@
       }
     }
 
-    return { analyze };
+    return { analyze, texts };
   }
 
   // 규칙이 만든 대사(base)에 Gemini 발언을 덮어쓴다 — 빠진 사람은 규칙 대사가 남는다
