@@ -13,9 +13,9 @@
     "max_bars": 96
   },
   "created_at": "2026-11-19T05:49:16+00:00",
-  "updated_at": "2026-11-22T11:00:29+00:00",
-  "scan_bar": 1795343400000,
-  "scan_count": 133,
+  "updated_at": "2026-11-22T11:30:08+00:00",
+  "scan_bar": 1795345200000,
+  "scan_count": 134,
   "initial_equity": 10000.0,
   "equity": 10000.0,
   "position": null,
@@ -37,7 +37,9 @@
     "time_exits": 0,
     "last_trade_at": null
   },
-  "signals_seen": [],
+  "signals_seen": [
+    "1795345200000|LONG"
+  ],
   "killswitch": {
     "ok": true,
     "reason": "정상",
@@ -57,10 +59,12 @@
     }
   },
   "last_scan": {
-    "ts": "2026-11-22T11:00:29+00:00",
-    "bar": "2026-11-22T10:30:00+00:00",
-    "action": "HOLD",
-    "events": [],
-    "price": 60850.0
+    "ts": "2026-11-22T11:30:08+00:00",
+    "bar": "2026-11-22T11:00:00+00:00",
+    "action": "SKIP",
+    "events": [
+      "세션 밖 진입(asia) — 후보는 기록"
+    ],
+    "price": 60975.0
   }
 }
