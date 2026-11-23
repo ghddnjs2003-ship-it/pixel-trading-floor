@@ -22,14 +22,16 @@ from pathlib import Path
 
 from backend.ai_filter import FilterConfig
 from backend.bybit_client import DEMO_BASE_URL, TESTNET_BASE_URL, BybitClient, BybitConfigError
-from backend.testnet_auto import (AutoConfig, RunLock, TestnetAuto, build_client, main,
-                                  next_bar_close_ms, print_banner)
+from backend.testnet_auto import (AutoConfig, RunLock, TestnetAuto, build_client, format_live_line,
+                                  main, nearest_level, next_bar_close_ms, next_scan_ms, print_banner,
+                                  run_live_loop, swing_levels, volatility_spike)
 
 TF = 1_800_000                     # 30분
 START = 1_790_000_000_000          # 2026-09-19 14:00 UTC → 진입 봉은 02:00 UTC(아시아 세션)
 PRICE = 60_000.0
 ATR = 300.0                        # 3ATR = 900 → 0.001개 손실 $0.90 (예산 $1.50 안)
-ENV_KEYS = ("BYBIT_API_KEY", "BYBIT_API_SECRET", "BYBIT_TESTNET", "BYBIT_DEMO", "BYBIT_ENV")
+ENV_KEYS = ("BYBIT_API_KEY", "BYBIT_API_SECRET", "BYBIT_TESTNET", "BYBIT_DEMO", "BYBIT_ENV",
+            "BYBIT_ADAPTIVE")
 
 
 def no_network(*_args, **_kwargs):
@@ -743,6 +745,328 @@ class ReplayAndCliTests(TestnetAutoTestBase):
         self.assertEqual(rec["action"], "OPEN")
         self.assertEqual(rec["signal"]["side"], sig["side"])
         self.assertEqual(len(engine.client.get_positions("BTCUSDT")), 1)
+
+
+def staged_candles(prior_high, prior_low, last_high, last_low, n=79):
+    """앞 n봉은 같은 폭, 마지막 확정 봉만 다른 폭 — 변동성·기준선 상황을 따로 만든다(최소 60봉 이상)."""
+    bars = [{"t": START + i * TF, "o": PRICE, "h": prior_high, "l": prior_low, "c": PRICE,
+             "v": 10.0} for i in range(n)]
+    bars.append({"t": START + n * TF, "o": PRICE, "h": last_high, "l": last_low, "c": PRICE,
+                 "v": 10.0})
+    return bars
+
+
+def mixed_volatility_candles(n=79):
+    """5봉마다 큰 봉, 나머지는 작은 봉 — ATR 평균은 낮은데 마지막 봉만 폭이 큰 '변동성 급증'."""
+    bars = []
+    for i in range(n):
+        wide = (i % 5 == 0)
+        bars.append({"t": START + i * TF, "o": PRICE, "h": PRICE + (800 if wide else 25),
+                     "l": PRICE - (800 if wide else 25), "c": PRICE, "v": 10.0})
+    bars.append({"t": START + n * TF, "o": PRICE, "h": PRICE + 900, "l": PRICE - 900,
+                 "c": PRICE, "v": 10.0})
+    return bars
+
+
+class FakeClock:
+    """실제로 기다리지 않는 시계 — sleep이 시각을 앞으로 밀고, 정해진 시각에 Ctrl+C를 흔낸다."""
+
+    def __init__(self, start_ms=START, stop_at=None):
+        self.ms = int(start_ms)
+        self.stop_at = stop_at
+        self.sleeps = 0
+
+    def now(self):
+        return self.ms
+
+    def sleep(self, sec):
+        self.sleeps += 1
+        self.ms += int(round(float(sec) * 1000))
+        if self.stop_at is not None and self.ms >= self.stop_at:
+            raise KeyboardInterrupt
+
+
+class StubEngine:
+    """run_live_loop가 쓰는 부분(tick·quote·state·cfg)만 있는 가짜 엔진 — 주기·출력만 시험한다."""
+
+    def __init__(self, watch=None, adaptive=True, price=PRICE, state=None):
+        self.cfg = AutoConfig(data_dir=tempfile.mkdtemp(), adaptive=adaptive)
+        self.watch = watch or {"adaptive": adaptive, "mode": "normal", "interval_min": 30,
+                               "reasons": []}
+        self.price = price
+        self.state = state if state is not None else {"position": None}
+        self.ticks = 0
+
+    @property
+    def interval_min(self):
+        return 30
+
+    def tick(self):
+        self.ticks += 1
+        return {"ts": "2026-09-19T02:01:30+00:00", "bar_kst": "2026-09-19 11:30",
+                "action": "HOLD", "price": self.price, "events": [], "position": None,
+                "equity": 50.0, "watch": self.watch,
+                "stats": {"trades": 0, "win_rate_pct": None, "net_pnl": 0.0, "avg_r": None}}
+
+    def quote(self):
+        return {"price": self.price, "source": "ticker", "note": ""}
+
+    def load_state(self):
+        return self.state
+
+
+class AdaptiveWatchTests(TestnetAutoTestBase):
+    """상황 맞춤 감시 — 집중 조건·주기 결정·안전장치 유지."""
+
+    def adaptive_engine(self, ai=None, client=None, **cfg):
+        return self.engine(ai=ai, client=client,
+                           cfg=AutoConfig(data_dir=self.dir, adaptive=True, **cfg))
+
+    def tick_bars(self, engine, bars, signals=None):
+        forming = {"t": bars[-1]["t"] + TF, "o": bars[-1]["c"], "h": bars[-1]["c"] + 5,
+                   "l": bars[-1]["c"] - 5, "c": bars[-1]["c"], "v": 1.0}
+        return engine.tick(candles=bars + [forming], now_ms=forming["t"] + 60_000,
+                           signals=[] if signals is None else signals)
+
+    def test_calm_market_far_from_levels_stays_on_the_bar_interval(self):
+        bars = staged_candles(PRICE + 600, PRICE - 600, PRICE + 100, PRICE - 100)
+        rec = self.tick_bars(self.adaptive_engine(ai=False), bars)
+        self.assertEqual(rec["watch"]["mode"], "normal")
+        self.assertEqual(rec["watch"]["interval_min"], 30)
+        self.assertEqual(rec["watch"]["reasons"], [])
+        self.assertIsNone(volatility_spike(bars))
+
+    def test_volatility_spike_switches_to_5_minutes(self):
+        bars = mixed_volatility_candles()
+        self.assertGreater(volatility_spike(bars), 1.5)
+        rec = self.tick_bars(self.adaptive_engine(ai=False), bars)
+        self.assertEqual(rec["watch"]["mode"], "focus")
+        self.assertEqual(rec["watch"]["interval_min"], 5)
+        self.assertTrue(any("변동성" in r for r in rec["watch"]["reasons"]))
+
+    def test_price_near_swing_high_switches_to_5_minutes(self):
+        bars = staged_candles(PRICE + 150, PRICE - 450, PRICE + 80, PRICE - 80)
+        bsl, ssl = swing_levels(bars)
+        self.assertAlmostEqual(bsl, PRICE + 150, places=2)
+        level = nearest_level(PRICE, bsl, ssl)
+        self.assertEqual(level["name"], "BSL")
+        rec = self.tick_bars(self.adaptive_engine(ai=False), bars)
+        self.assertEqual(rec["watch"]["mode"], "focus")
+        self.assertTrue(any("BSL" in r for r in rec["watch"]["reasons"]))
+
+    def test_nearest_level_picks_the_closer_side_and_respects_the_band(self):
+        self.assertEqual(nearest_level(PRICE, PRICE + 100, PRICE - 500)["name"], "BSL")
+        self.assertEqual(nearest_level(PRICE, PRICE + 500, PRICE - 100)["name"], "SSL")
+        self.assertIsNone(nearest_level(PRICE, PRICE + 1000, PRICE - 1000))
+        self.assertIsNone(nearest_level(None, PRICE + 10, PRICE - 10))
+
+    def test_open_position_switches_to_focus_and_reason_is_logged(self):
+        engine = self.adaptive_engine(ai=FakeAI())
+        first = self.tick(engine)
+        self.assertEqual(first["action"], "OPEN")
+        self.assertEqual(first["watch"]["interval_min"], 5)         # 주문한 스캔부터 다음 대기가 5분
+        rec = self.tick(engine, signals=[])
+        self.assertEqual(rec["watch"]["mode"], "focus")
+        self.assertEqual(rec["watch"]["interval_min"], 5)
+        self.assertIn("열린 포지션", rec["watch"]["reasons"])
+
+    def test_adaptive_off_never_shortens_the_wait(self):
+        engine = self.engine(ai=FakeAI())                       # 기본값 adaptive=False
+        self.tick(engine)
+        rec = self.tick(engine, signals=[])
+        self.assertEqual(rec["watch"]["mode"], "normal")
+        self.assertEqual(rec["watch"]["interval_min"], 30)
+        self.assertFalse(rec["watch"]["adaptive"])
+        self.assertIn("열린 포지션", rec["watch"]["reasons"])    # 조건은 적어 두되 주기는 그대로
+
+    def test_watch_is_saved_in_state_and_log(self):
+        engine = self.adaptive_engine(ai=False)
+        self.tick_bars(engine, mixed_volatility_candles())
+        state = json.loads(Path(engine.state_path).read_text(encoding="utf-8"))
+        self.assertEqual(state["watch"]["mode"], "focus")
+        self.assertEqual(state["watch"]["interval_min"], 5)
+        row = json.loads(Path(engine.log_path).read_text(encoding="utf-8").strip().splitlines()[-1])
+        self.assertEqual(row["watch"]["interval_min"], 5)
+        self.assertIn("변동성", " ".join(row["watch"]["reasons"]))
+
+    def test_focus_mode_keeps_the_50_dollar_safety_limits(self):
+        client = self.client()
+        engine = self.adaptive_engine(ai=FakeAI(), client=client)
+        rec = self.tick(engine)
+        self.assertEqual(rec["action"], "OPEN")
+        plan = rec["order"]["plan"]
+        self.assertLessEqual(plan["expectedLossUsd"], 1.5)       # 50달러 × 3%
+        self.assertLessEqual(plan["lossBudgetUsd"], 1.5)
+        self.assertLessEqual(plan["leverage"], 5)
+        self.assertEqual(rec["base_url"], TESTNET_BASE_URL)
+        self.assertTrue(rec["testnet_only"])
+        self.assertTrue(rec["sandbox_only"])
+
+    def test_focus_scans_do_not_review_the_same_signal_again(self):
+        ai = FakeAI()
+        engine = self.adaptive_engine(ai=ai)
+        self.tick(engine)
+        self.assertEqual(ai.calls, 1)
+        rec = engine.tick(candles=self.with_forming(), now_ms=self.now + 5 * 60_000,
+                          signals=[self.sig])
+        self.assertNotEqual(rec["action"], "OPEN")
+        self.assertEqual(ai.calls, 1)                            # 같은 신호를 다시 심사하지 않는다
+
+    def test_focus_scan_with_open_position_skips_ai_for_a_new_signal(self):
+        ai = FakeAI()
+        engine = self.adaptive_engine(ai=ai)
+        self.tick(engine)
+        extra = {"t": self.candles[-1]["t"] + TF, "o": PRICE, "h": PRICE + 300,
+                 "l": PRICE - 300, "c": PRICE, "v": 10.0}
+        bars = self.candles + [extra]
+        forming = {"t": extra["t"] + TF, "o": PRICE, "h": PRICE + 300, "l": PRICE - 300,
+                   "c": PRICE, "v": 1.0}
+        rec = engine.tick(candles=bars + [forming], now_ms=forming["t"] + 60_000,
+                          signals=[signal_at(bars)])
+        self.assertNotEqual(rec["action"], "OPEN")
+        self.assertEqual(ai.calls, 1)                            # 포지션 중이면 AI를 부르지 않는다
+        self.assertEqual(rec["watch"]["mode"], "focus")
+
+    def test_next_scan_ms_matches_bar_close_for_30_and_tightens_to_5(self):
+        now = START + 30_000
+        self.assertEqual(next_scan_ms(now, 30), next_bar_close_ms(now, TF))
+        focus = next_scan_ms(now, 5)
+        self.assertLessEqual(focus - now, 5 * 60_000)          # 5분 격자의 다음 마감+90초
+        self.assertGreater(focus - now, 0)
+        self.assertEqual(next_scan_ms(focus, 5) - focus, 5 * 60_000)
+        at30 = next_scan_ms(now, 30)
+        self.assertEqual(next_scan_ms(at30, 30) - at30, 30 * 60_000)   # 30분 격자도 그대로 돈다
+
+
+class LiveTickerTests(TestnetAutoTestBase):
+    """1분 상태 줄 + 루프 반응성 — 실제로 기다리지 않고 시계를 흉내내 확인한다."""
+
+    def test_live_line_shows_price_mode_and_countdown(self):
+        watch = {"adaptive": True, "mode": "normal", "interval_min": 30, "reasons": []}
+        line = format_live_line(now_ms=START, symbol="BTCUSDT", price=60_975.5,
+                                state={"position": None}, watch=watch,
+                                due_ms=START + 28 * 60_000 + 30_000)
+        self.assertIn("KST", line)
+        self.assertIn("BTCUSDT 60,975.50", line)
+        self.assertIn("포지션 없음", line)
+        self.assertIn("감시 일반 30분", line)
+        self.assertIn("28분 30초 남음", line)
+
+    def test_live_line_shows_position_pnl_and_focus_reason(self):
+        pos = {"side": "Buy", "qty": "0.001", "entry": 60_000.0, "stop": 59_100.0,
+               "target": 63_600.0, "risk_usd": 0.9}
+        watch = {"adaptive": True, "mode": "focus", "interval_min": 5,
+                 "reasons": ["열린 포지션"]}
+        line = format_live_line(now_ms=START, symbol="BTCUSDT", price=60_150.0,
+                                state={"position": pos}, watch=watch, due_ms=START + 60_000)
+        self.assertIn("보유 롱 0.001 @ 60,000.00", line)
+        self.assertIn("평가 +0.15 USDT(+0.17R)", line)
+        self.assertIn("감시 집중 5분", line)
+        self.assertIn("열린 포지션", line)
+
+    def test_live_line_survives_a_missing_price(self):
+        line = format_live_line(now_ms=START, symbol="BTCUSDT", price=None,
+                                state={"position": None}, watch=None, due_ms=None)
+        self.assertIn("시세 조회 실패", line)
+        self.assertNotIn("None", line)
+
+    def test_quote_falls_back_to_the_last_scan_price(self):
+        self.assertAlmostEqual(self.engine().quote()["price"], 60_000.0, places=2)
+        cfg = AutoConfig(data_dir=self.dir, symbol="DOGEUSDT")   # mock 시세에 없는 종목
+        engine = TestnetAuto(cfg, client=self.client(), ai=False)
+        state = engine.load_state()
+        state["last_scan"] = {"ts": "x", "price": 123.4}
+        engine.save_state(state)
+        quote = engine.quote()
+        self.assertEqual(quote["price"], 123.4)
+        self.assertEqual(quote["source"], "last_scan")
+        self.assertIsNone(TestnetAuto(AutoConfig(data_dir=tempfile.mkdtemp(), symbol="DOGEUSDT"),
+                                      client=self.client(), ai=False).quote()["price"])
+
+    def test_loop_prints_one_line_per_minute_while_waiting(self):
+        engine = StubEngine(watch={"adaptive": True, "mode": "focus", "interval_min": 5,
+                                   "reasons": ["열린 포지션"]})
+        clock = FakeClock(START)
+        lines = []
+        code = run_live_loop(engine, clock=clock.now, sleep=clock.sleep, out=lines.append,
+                             max_rounds=3)
+        self.assertEqual(code, 0)
+        live = [l for l in lines if "포지션 없음" in l]
+        self.assertGreaterEqual(len(live), 4)                     # 5분 대기 × 2회 → 1분마다
+        self.assertTrue(all("감시 집중 5분" in l for l in live))
+        self.assertTrue(all("다음 점검" in l and "남음" in l for l in live))
+
+    def test_loop_honours_the_focus_interval_from_the_scan(self):
+        engine = StubEngine(watch={"adaptive": True, "mode": "focus", "interval_min": 5,
+                                   "reasons": ["변동성 급증"]})
+        clock = FakeClock(START)
+        seen = []
+        original = engine.tick
+
+        def tick():
+            seen.append(clock.ms)
+            return original()
+
+        engine.tick = tick
+        run_live_loop(engine, clock=clock.now, sleep=clock.sleep, out=lambda _l: None,
+                      max_rounds=2)
+        self.assertEqual(seen[1] - seen[0], next_scan_ms(START, 5) - START)   # 30분이 아니라 5분
+
+    def test_loop_keeps_30_minutes_when_adaptive_is_off(self):
+        engine = StubEngine(watch={"adaptive": False, "mode": "focus", "interval_min": 5,
+                                   "reasons": []}, adaptive=False)
+        clock = FakeClock(START)
+        seen = []
+        original = engine.tick
+
+        def tick():
+            seen.append(clock.ms)
+            return original()
+
+        engine.tick = tick
+        run_live_loop(engine, clock=clock.now, sleep=clock.sleep, out=lambda _l: None,
+                      max_rounds=2)
+        self.assertEqual(seen[1] - seen[0], next_scan_ms(START, 30) - START)
+
+    def test_loop_stops_immediately_on_ctrl_c(self):
+        engine = StubEngine()
+        clock = FakeClock(START, stop_at=START + 3 * 60_000 + 30_000)
+        lines = []
+        code = run_live_loop(engine, clock=clock.now, sleep=clock.sleep, out=lines.append)
+        self.assertEqual(code, 0)
+        self.assertIn("안전 종료", "".join(lines))
+        self.assertEqual(engine.ticks, 1)
+        self.assertLess(clock.sleeps, 400)                        # 1초 단위로 끊어 잔다
+
+    def test_quiet_loop_prints_nothing(self):
+        engine = StubEngine()
+        clock = FakeClock(START)
+        lines = []
+        run_live_loop(engine, quiet=True, clock=clock.now, sleep=clock.sleep,
+                      out=lines.append, max_rounds=1)
+        self.assertEqual(lines, [])
+
+    def test_cli_adaptive_flag_and_env_reach_the_scan(self):
+        path = os.path.join(self.dir, "adaptive_candles.json")
+        Path(path).write_text(json.dumps(self.candles), encoding="utf-8")
+
+        def run(tag, extra):
+            state = os.path.join(self.dir, f"{tag}_state.json")
+            log = os.path.join(self.dir, f"{tag}_log.jsonl")
+            code = main(["--once", "--mock", "--no-ai", "--candles", path,
+                         "--state", state, "--log", log,
+                         "--killswitch", os.path.join(self.dir, f"{tag}_ks.json"),
+                         "--quiet"] + extra)
+            self.assertEqual(code, 0)
+            row = json.loads(Path(log).read_text(encoding="utf-8").strip().splitlines()[-1])
+            return row["watch"]["adaptive"]
+
+        self.assertTrue(run("flag", ["--adaptive"]))
+        self.assertFalse(run("off", ["--adaptive", "--no-adaptive"]))
+        self.assertFalse(run("plain", []))
+        os.environ["BYBIT_ADAPTIVE"] = "true"
+        self.assertTrue(run("env", []))
+        self.assertFalse(run("env_off", ["--no-adaptive"]))
 
 
 if __name__ == "__main__":

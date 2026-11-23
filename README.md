@@ -83,7 +83,7 @@
   `BYBIT_ENV=demo`)를 넣고 Demo Trading 키를 씀니다 — 둘 다 켜져 있으면 데모가 우선합니다.
 
 - 집 PC(Windows)에서 더블클릭으로 돌리는 3개 파일: `run_testnet_auto_mock.bat`(드라이런 1회) ·
-  `run_testnet_auto_status.bat`(상태) · `run_testnet_auto.bat`(30분 봉마다 자동)
+  `run_testnet_auto_status.bat`(상태) · `run_testnet_auto.bat`(30분 봉마다 자동 · 1분마다 상태 한 줄 · 상황 맞춤 감시)
 - 코드: `backend/testnet_auto.py` · 주문 클라이언트: `backend/bybit_client.py` · 테스트: `backend/test_testnet_auto.py`
 - 데모는 테스트넷과 다른 계좌라 상태·로그도 `*.demo`로 따로 쌓입니다. 데모에서 청산 손익 조회가 제한되면
   청산은 기록하고 손익만 '미확인'으로 남기며 루프는 계속 돕니다.

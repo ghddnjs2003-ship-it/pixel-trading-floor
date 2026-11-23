@@ -8,6 +8,9 @@ echo  Pixel Trading Floor - TESTNET/DEMO AUTO MODE (Bybit sandbox only)
 echo  50 USDT seed - 3%% loss per trade - leverage 3x - TP/SL attached
 echo  Sandbox only: api-testnet.bybit.com or api-demo.bybit.com - no real money.
 echo  Demo Trading: put BYBIT_DEMO=true in backend\.env (see TESTNET_AUTO.md).
+echo  A live status line prints every minute.
+echo  Adaptive watch: 5-min checks while a position is open, volatility spikes,
+echo                  or price is within 0.35%% of the swing high/low (BSL/SSL).
 echo  Ctrl+C stops the loop. Open positions keep their TP/SL.
 echo ============================================================
 echo.
@@ -30,9 +33,9 @@ if not exist "backend\.env" (
   exit /b 1
 )
 
-echo [INFO] Starting the 30-minute bar loop. First scan runs now.
+echo [INFO] Starting the 30-minute bar loop (5-minute adaptive checks, 1-minute status). First scan runs now.
 echo.
-python -m backend.testnet_auto --loop %*
+python -m backend.testnet_auto --loop --adaptive %*
 set CODE=%ERRORLEVEL%
 echo.
 if not "%CODE%"=="0" echo [ERROR] It stopped with code %CODE%. Read the messages above.

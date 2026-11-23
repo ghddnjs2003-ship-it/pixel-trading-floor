@@ -9,6 +9,14 @@
 4) 열린 포지션은 거래소에 걸어 둔 TP/SL이 닫는다. 이 모듈은 ① 포지션이 아직 있는지 ② 96봉 시간 청산인지
    만 보고, 청산이 확인되면 거래소 청산 기록(`/v5/position/closed-pnl`)으로 손익을 남긴다.
    mock 모드에는 거래소가 없으므로 확정 봉의 고가·저가로 손절·목표·시간 청산을 흉내 낸다.
+5) **루프에서 1분마다 상태 한 줄**: 30분을 한 번에 자지 않고 60초마다 현재가·보유/평가손익·감시 모드·
+   다음 점검까지 남은 시간을 찍는다(창이 멈춘 것처럼 보이지 않게). 1초 단위로 끊어 자므로 Ctrl+C도 즉시 먹는다.
+6) **상황 맞춤 감시(Adaptive Mode, `--adaptive` 또는 `BYBIT_ADAPTIVE=true`)**: 열린 포지션 · 변동성 급증
+   (최근 확정 봉 고가-저가 폭 ≥ 최근 20봉 평균 ATR × 1.5) · 현재가가 BSL/SSL(최근 스윙 고점·저점) ±0.35%
+   안쪽 중 하나라도 걸리면 **다음 대기를 30분 → 5분**으로 줄인다. 다만 AI 심사는 5분마다가 아니라
+   **새 M1 후보가 처음 떴을 때만** 부른다(`signals_seen`이 같은 신호를 두 번 심사하지 않는다 — 무료 한도 보호).
+   진입 규칙과 안전장치(50달러 시드·1회 2~4%·레버리지 5배·일일 킬스위치·중복 진입 금지·메인넷 차단)는
+   이 모드에서도 **한 글자도 바뀌지 않는다**. 집중 감시는 '얼마나 자주 보는가'만 바꾼다.
 
 지키는 선
 - **샌드박스 전용**: 주소는 `https://api-testnet.bybit.com`(테스트넷) 또는 `https://api-demo.bybit.com`
@@ -32,7 +40,9 @@
     python -m backend.testnet_auto --once                 # 1회 점검·판단(키 없으면 mock)
     python -m backend.testnet_auto --once --demo          # 데모 트레이딩(api-demo)으로 1회
     python -m backend.testnet_auto --once --mock          # 키가 있어도 mock 드라이런
-    python -m backend.testnet_auto --loop                 # 30분 봉 마감 +90초마다 계속(Ctrl+C 종료)
+    python -m backend.testnet_auto --loop                 # 30분 봉 마감 +90초마다 계속(Ctrl+C 종료) · 1분마다 상태 한 줄
+    python -m backend.testnet_auto --loop --adaptive      # 상황 맞춤 감시(집중 5분 / 일반 30분)
+    python -m backend.testnet_auto --loop --no-adaptive   # 상황 맞춤 감시 끔(30분 고정)
     python -m backend.testnet_auto --status               # 계좌·포지션·킬스위치·최근 기록
     python -m backend.testnet_auto --stop / --resume      # 신규 진입 정지 / 해제(돌고 있는 루프에도 먹힘)
     python -m backend.testnet_auto --once --candles data/btc_15m_3600.json   # 오프라인 재생(주문 없음)
@@ -57,9 +67,9 @@ from .ai_filter import AIFilter, build_context, nominee_setup, prepare_series
 from .backtest import BacktestConfig, INTERVAL_MS, in_session, load_candles, session_hours
 from .bybit_client import (ENV_LABELS, SANDBOX_ENVS, BybitAPIError, BybitClient,
                            BybitConfigError, BybitError, OrderRejected, risk_limits)
-from .config import ai_filter_enabled, get_ai_filter_config, get_killswitch_rules
+from .config import ai_filter_enabled, get_ai_filter_config, get_killswitch_rules, load_env_file
 from .risk import KillSwitch
-from .strategy import Engine, Params
+from .strategy import Engine, Params, atr_series
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
@@ -68,6 +78,15 @@ KST = timezone(timedelta(hours=9))
 BAR_DELAY_SEC = 90          # 봉 마감 뒤 이만큼 기다렸다가 다음 봉을 '확정'으로 본다(거래소 지연 여유)
 MIN_CANDLES = 60            # 신호를 세우려면 최소 이만큼의 확정 봉이 필요하다(load_candles와 같은 하한)
 MAX_SEEN = 500              # 같은 신호를 두 번 처리하지 않기 위해 남기는 기억(최근 N개)
+
+# 살아 있는 화면 + 상황 맞춤 감시 — '얼마나 자주 볼지'만 정한다(주문 규칙·안전장치는 그대로)
+DEFAULT_TICK_SEC = 60       # 루프가 화면에 상태 한 줄을 찍는 간격(초)
+DEFAULT_FOCUS_MIN = 5       # 집중 감시 대기(분)
+DEFAULT_VOL_MULT = 1.5      # 변동성 급증: 최근 확정 봉 폭 / 평균 ATR
+DEFAULT_ATR_PERIOD = 14     # ATR 기간(전략과 같은 Wilder)
+DEFAULT_ATR_LOOKBACK = 20   # 평균 ATR을 낼 최근 봉 수
+DEFAULT_LEVEL_PCT = 0.35    # BSL/SSL '근접' 폭(%) — 현재가가 이 안쪽이면 집중 감시
+DEFAULT_SWING_LOOKBACK = 20 # BSL/SSL을 잡을 직전 봉 수
 
 # 이 모듈이 절대 건드리면 안 되는 파일 이름 — 서버 30분 모의매매가 쓰는 것들
 PAPER_NAMES = ("paper_state.json", "paper_log.jsonl", "paper_killswitch.json",
@@ -91,6 +110,14 @@ class AutoConfig:
     max_bars: int = 96               # 96봉(48시간) 시간 청산
     entry_window_sec: int = 300      # 다음 봉이 시작된 뒤 이 시간 안에만 진입(늦은 추격 금지)
     session: str = "asia"            # 진입 봉이 아시아 세션(00-08 UTC) 안일 때만
+    adaptive: bool = False           # 상황 맞춤 감시(집중 5분 / 일반 30분) — 기본은 꺼짐(기존 동작 유지)
+    tick_sec: int = DEFAULT_TICK_SEC  # 루프에서 상태 한 줄을 찍는 간격(초)
+    focus_interval_min: int = DEFAULT_FOCUS_MIN  # 집중 감시 대기(분)
+    vol_atr_mult: float = DEFAULT_VOL_MULT       # 변동성 급증 배수
+    atr_period: int = DEFAULT_ATR_PERIOD
+    atr_lookback: int = DEFAULT_ATR_LOOKBACK
+    level_proximity_pct: float = DEFAULT_LEVEL_PCT  # BSL/SSL 근접 폭(%)
+    swing_lookback: int = DEFAULT_SWING_LOOKBACK
     time_exit: bool = True           # 시간 청산 사용
     data_dir: str = str(DATA)
     state_path: str = ""             # 비우면 data_dir 아래 모드별 기본 경로
@@ -118,6 +145,177 @@ def _kst(ms: Optional[int]) -> Optional[str]:
 def next_bar_close_ms(now_ms: int, tf_ms: int, delay_sec: int = BAR_DELAY_SEC) -> int:
     """다음 봉이 마감되고 delay_sec만큼 지난 시각(ms). --loop가 이 시각에 맞춰 돈다."""
     return ((int(now_ms) // int(tf_ms)) + 1) * int(tf_ms) + int(delay_sec * 1000)
+
+
+def next_scan_ms(now_ms: int, interval_min: int, delay_sec: int = BAR_DELAY_SEC) -> int:
+    """다음 점검 시각 — interval_min 격자의 '마감 + delay_sec' 지점.
+
+    30분이면 next_bar_close_ms와 같은 값이고, 집중 감시(5분)에서는 5분 격자로 당겨진다.
+    """
+    step = max(1, int(interval_min)) * 60_000
+    return ((int(now_ms) // step) + 1) * step + int(delay_sec * 1000)
+
+
+# ---------------------------------------------------------------------- 상황 판단(순수 함수)
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    """환경변수 참·거짓 — BYBIT_ADAPTIVE 같은 스위치용(이상한 값은 기본값)."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    value = str(raw).strip().lower()
+    if value in ("1", "true", "yes", "on", "y"):
+        return True
+    if value in ("0", "false", "no", "off", "n"):
+        return False
+    return default
+
+
+def atr_average(bars: Sequence[Dict], period: int = DEFAULT_ATR_PERIOD,
+                lookback: int = DEFAULT_ATR_LOOKBACK) -> Optional[float]:
+    """최근 lookback개 ATR(Wilder)의 평균 — 변동성 급증을 재는 기준선.
+
+    봉이 모자라 ATR이 서지 않으면 None(그때는 급증 판정을 하지 않는다 — 거짓 경보보다 침묵).
+    """
+    series = [v for v in atr_series(bars, int(period)) if v]
+    if not series:
+        return None
+    window = series[-max(1, int(lookback)):]
+    return sum(window) / len(window)
+
+
+def volatility_spike(bars: Sequence[Dict], mult: float = DEFAULT_VOL_MULT,
+                     period: int = DEFAULT_ATR_PERIOD,
+                     lookback: int = DEFAULT_ATR_LOOKBACK) -> Optional[float]:
+    """최근 확정 봉의 고가-저가 폭이 평균 ATR의 mult배 이상이면 그 배수를, 아니면 None."""
+    if len(bars) < 3:
+        return None
+    avg = atr_average(bars, period, lookback)
+    if not avg or avg <= 0:
+        return None
+    bar = bars[-1]
+    ratio = (float(bar["h"]) - float(bar["l"])) / avg
+    return round(ratio, 2) if ratio >= float(mult) else None
+
+
+def swing_levels(bars: Sequence[Dict], lookback: int = DEFAULT_SWING_LOOKBACK
+                 ) -> tuple[Optional[float], Optional[float]]:
+    """직전 lookback봉의 최고 고가(BSL)·최저 저가(SSL).
+
+    마지막 확정 봉은 빼고 본다 — 그 봉이 들어가면 자기 고가가 곧 BSL이 되어 늘 '근접'이 된다.
+    """
+    prior = list(bars[:-1])[-max(2, int(lookback)):]
+    if len(prior) < 2:
+        return None, None
+    return (max(float(b["h"]) for b in prior), min(float(b["l"]) for b in prior))
+
+
+def nearest_level(price: Optional[float], bsl: Optional[float], ssl: Optional[float],
+                  pct: float = DEFAULT_LEVEL_PCT) -> Optional[Dict]:
+    """현재가가 BSL/SSL ±pct% 안에 있는가 — 가까운 쪽 하나만 돌려준다."""
+    if not price or float(price) <= 0:
+        return None
+    price = float(price)
+    best: Optional[Dict] = None
+    for name, level in (("BSL", bsl), ("SSL", ssl)):
+        if not level or float(level) <= 0:
+            continue
+        gap = (price - float(level)) / float(level) * 100.0
+        if abs(gap) <= float(pct) and (best is None or abs(gap) < abs(best["gap_pct"])):
+            best = {"name": name, "level": round(float(level), 2), "gap_pct": round(gap, 3)}
+    return best
+
+
+def adaptive_watch(bars: Sequence[Dict], price: Optional[float], has_position: bool, *,
+                   enabled: bool = False, focus_min: int = DEFAULT_FOCUS_MIN, normal_min: int = 30,
+                   vol_mult: float = DEFAULT_VOL_MULT, atr_period: int = DEFAULT_ATR_PERIOD,
+                   atr_lookback: int = DEFAULT_ATR_LOOKBACK,
+                   level_pct: float = DEFAULT_LEVEL_PCT,
+                   swing_lookback: int = DEFAULT_SWING_LOOKBACK) -> Dict:
+    """이번 스캔 뒤 얼마나 자주 볼지 정한다. 켜져 있을 때만 주기를 줄인다.
+
+    집중 조건(하나라도): ① 열린 포지션 ② 변동성 급증 ③ 현재가가 BSL/SSL ±pct% 안쪽.
+    꺼져 있어도 조건은 reasons에 적어 둔다 — 왜 집중이었는지 로그에서 볼 수 있게.
+    """
+    reasons: List[str] = []
+    if has_position:
+        reasons.append("열린 포지션")
+    avg = atr_average(bars, atr_period, atr_lookback) if len(bars) >= 3 else None
+    if avg and avg > 0:
+        ratio = round((float(bars[-1]["h"]) - float(bars[-1]["l"])) / avg, 2)
+        if ratio >= float(vol_mult):
+            reasons.append(f"변동성 급증(봉 폭 ATR×{ratio:g})")
+    bsl, ssl = swing_levels(bars, swing_lookback)
+    level = nearest_level(price, bsl, ssl, level_pct)
+    if level:
+        reasons.append(f"{level['name']} {level['level']:,.2f} 근접({level['gap_pct']:+.2f}%)")
+    on = bool(enabled and reasons)
+    return {
+        "adaptive": bool(enabled),
+        "mode": "focus" if on else "normal",
+        "interval_min": int(focus_min) if on else int(normal_min),
+        "reasons": reasons,
+        "price": round(float(price), 2) if price else None,
+        "atr_avg": round(avg, 2) if avg else None,
+        "bsl": round(bsl, 2) if bsl else None,
+        "ssl": round(ssl, 2) if ssl else None,
+        "level": level,
+    }
+
+
+def _unrealized(price: Optional[float], pos: Dict) -> Optional[Dict]:
+    """상태 파일 포지션(또는 거래소 포지션)의 평가손익 — 상태 줄에 쓰는 대략치(수수료 제외)."""
+    if not price:
+        return None
+    entry = float(pos.get("entry") or pos.get("entryPrice") or 0.0)
+    qty = float(pos.get("qty") or pos.get("size") or 0.0)
+    if entry <= 0 or qty <= 0:
+        return None
+    sign = 1.0 if str(pos.get("side") or "").lower() in ("buy", "long") else -1.0
+    usd = (float(price) - entry) * qty * sign
+    stop = float(pos.get("stop") or pos.get("stopLoss") or 0.0)
+    risk = float(pos.get("risk_usd") or 0.0) or abs(entry - stop) * qty
+    return {"usd": round(usd, 2), "r": round(usd / risk, 2) if risk else None}
+
+
+def format_live_line(*, now_ms: int, symbol: str, price: Optional[float], state: Dict,
+                     watch: Optional[Dict], due_ms: Optional[int], note: str = "") -> str:
+    """루프가 1분마다 찍는 한 줄 — 시세 · 보유/평가손익 · 감시 모드 · 다음 점검까지 남은 시간."""
+    watch = watch or {}
+    when = datetime.fromtimestamp(int(now_ms) / 1000, tz=KST).strftime("%H:%M:%S")
+    parts = [f"[testnet-auto] {when} KST"]
+    parts.append(f"{symbol} " + (f"{float(price):,.2f}" if price else "시세 조회 실패"))
+
+    pos = state.get("position") or state.get("exchange_position")
+    if pos:
+        side = "롱" if str(pos.get("side") or "").lower() in ("buy", "long") else "숏"
+        entry = float(pos.get("entry") or pos.get("entryPrice") or 0.0)
+        qty = pos.get("qty") if pos.get("qty") is not None else pos.get("size")
+        parts.append(f"보유 {side} {qty} @ {entry:,.2f}")
+        pnl = _unrealized(price, pos)
+        if pnl is not None:
+            r = f"({pnl['r']:+.2f}R)" if pnl.get("r") is not None else ""
+            parts.append(f"평가 {pnl['usd']:+.2f} USDT{r}")
+    else:
+        parts.append("포지션 없음")
+
+    mode = watch.get("mode") or "normal"
+    interval = int(watch.get("interval_min") or 30)
+    if mode == "focus":
+        why = watch.get("reasons") or []
+        parts.append(f"감시 집중 {interval}분" + (f"({' · '.join(why)})" if why else ""))
+    else:
+        parts.append(f"감시 일반 {interval}분"
+                     + ("" if watch.get("adaptive") else "(적응형 꺼짐)"))
+
+    if due_ms:
+        due = int(due_ms)
+        remain = max(0, due - int(now_ms)) // 1000
+        at = datetime.fromtimestamp(due / 1000, tz=KST).strftime("%H:%M:%S")
+        parts.append(f"다음 점검 {at} ({remain // 60}분 {remain % 60:02d}초 남음)")
+    if note:
+        parts.append(note)
+    return " · ".join(parts)
 
 
 # ---------------------------------------------------------------------- 두뇌 + 손
@@ -186,6 +384,23 @@ class TestnetAuto:
     def _tf_ms(self) -> int:
         return INTERVAL_MS.get(str(self.cfg.interval), 1_800_000)
 
+    @property
+    def interval_min(self) -> int:
+        """일반(비집중) 점검 주기(분) — 봉 시간봉과 같다(기본 30)."""
+        try:
+            return max(1, int(float(str(self.cfg.interval))))
+        except (TypeError, ValueError):
+            return 30
+
+    def _watch(self, bars: Sequence[Dict], price: Optional[float], has_position: bool) -> Dict:
+        """설정값으로 상황 맞춤 감시를 계산한다(집중이면 다음 대기가 5분)."""
+        return adaptive_watch(
+            bars, price, has_position,
+            enabled=bool(self.cfg.adaptive), focus_min=self.cfg.focus_interval_min,
+            normal_min=self.interval_min, vol_mult=self.cfg.vol_atr_mult,
+            atr_period=self.cfg.atr_period, atr_lookback=self.cfg.atr_lookback,
+            level_pct=self.cfg.level_proximity_pct, swing_lookback=self.cfg.swing_lookback)
+
     def paused(self) -> bool:
         """사람이 --stop으로 세운 정지 표시. 돌고 있는 루프도 다음 스캔에서 바로 본다.
 
@@ -196,6 +411,24 @@ class TestnetAuto:
 
     def _fetch_default(self) -> Dict:
         return load_candles(self.cfg.symbol, str(self.cfg.interval), self.cfg.limit, self.cfg.source)
+
+    def quote(self) -> Dict:
+        """1분 상태 줄에 쓸 현재가 — 실패해도 루프를 죽이지 않는다.
+
+        공개 티커를 먼저 읽고, 실패하면 마지막 스캔 가격을 쓴다. 그것도 없으면 가격 없이 줄만 찍는다.
+        """
+        try:
+            price = float(self.client.get_last_price(self.cfg.symbol))
+            return {"price": price, "source": "ticker",
+                    "note": "mock 시세" if self.mock else ""}
+        except Exception as exc:                       # 네트워크·미지원·mock 시세 없음
+            last = (self.load_state().get("last_scan") or {}).get("price")
+            try:
+                last = float(last) if last is not None else None
+            except (TypeError, ValueError):
+                last = None
+            return {"price": last, "source": "last_scan" if last else None,
+                    "error": str(exc), "note": "마지막 스캔 가격" if last else "시세 조회 실패"}
 
     # ------------------------------------------------------------------ AI
     def _filter(self):
@@ -363,6 +596,9 @@ class TestnetAuto:
             candles, source = data["candles"], data.get("source")
         bars = sorted((c for c in candles if c.get("t") is not None), key=lambda c: int(c["t"]))
         next_open: Optional[float] = None
+        # 감시 모드의 기본값 — 포지션 정리 뒤에 다시 계산해 아래 모든 종료 경로에 실린다
+        watch: Dict = {"adaptive": bool(self.cfg.adaptive), "mode": "normal",
+                       "interval_min": self.interval_min, "reasons": []}
         while len(bars) > 1 and int(bars[-1]["t"]) + tf_ms > now_ms:
             forming = bars.pop()                        # 진행 중인 봉으로 신호를 세우지 않는다
             next_open = float(forming["o"])              # 이 봉의 시가 = 마지막 확정 봉의 '다음 봉 시가'
@@ -378,7 +614,8 @@ class TestnetAuto:
         def finish(action: str, events: List[str], signal=None, verdict=None, order=None,
                    account: Optional[Dict] = None) -> Dict:
             return self._finish(state, last, action, events, source=source, bars=len(bars),
-                                signal=signal, verdict=verdict, order=order, account=account)
+                                signal=signal, verdict=verdict, order=order, account=account,
+                                watch=watch)
 
         # 0) 거래소 상태 — 읽지 못하면 아무 주문도 내지 않는다(계좌를 모르는 채로 쏘지 않는다)
         try:
@@ -441,6 +678,10 @@ class TestnetAuto:
             blocked = True
         else:
             state["exchange_position"] = None
+
+        # 1-1) 상황 맞춤 감시 — 이번 스캔 뒤 얼마나 자주 볼지. 집중 조건(포지션·변동성·기준선 근접)은
+        #      adaptive가 꺼져 있어도 reasons에 적어 두고, 주기는 켜졌을 때만 5분으로 줄인다.
+        watch = self._watch(bars, float(last["c"]), bool(state.get("position") or rows))
 
         # 2) 새 신호 — 마지막 확정 봉에 후보1(M1)이 섰는가
         params, cfg = self.rule()
@@ -564,6 +805,8 @@ class TestnetAuto:
 
         state["position"] = self._position_from_order(order, sig, verdict, entry_bar_time, atr)
         pos = state["position"]
+        # 이제 포지션이 있다 — 다음 대기부터는 집중 감시(5분)로 본다
+        watch = self._watch(bars, float(last["c"]), True)
         action = "OPEN"
         events.append(
             f"{ENV_LABELS[self.env]} {'롱' if side == 'LONG' else '숏'} 진입 {pos['qty']}개 @ {float(pos['entry']):,.2f} · "
@@ -574,12 +817,14 @@ class TestnetAuto:
     # ------------------------------------------------------------------ 기록
     def _finish(self, state: Dict, last: Dict, action: str, events: List[str], *,
                 signal=None, verdict=None, order=None, account: Optional[Dict] = None,
-                source=None, bars: Optional[int] = None) -> Dict:
+                source=None, bars: Optional[int] = None, watch: Optional[Dict] = None) -> Dict:
         state["scan_bar"] = int(last["t"])
         state["scan_count"] = int(state.get("scan_count") or 0) + 1
         if account and account.get("equity") is not None:
             state["equity"] = round(float(account["equity"]), 2)
         state["killswitch"] = self._killswitch_summary()
+        if watch:
+            state["watch"] = dict(watch)
         self._recompute(state)
         record = {
             "ts": self.now().isoformat(timespec="seconds"),
@@ -591,6 +836,7 @@ class TestnetAuto:
             "equity": state.get("equity"),
             "riskBaseUsd": (account or {}).get("riskBaseUsd"),
             "action": action, "events": events,
+            "watch": dict(watch) if watch else None,
             "position": self._position_view(state),
             "exchange": {"open_positions": 1 if state.get("exchange_position") else 0},
             "signal": None if not signal else {
@@ -942,6 +1188,13 @@ def print_banner(engine: TestnetAuto) -> None:
     print(f"[testnet-auto] 안전 규칙: 최대 시드 ${lim['maxSeedUsd']:g} · 1회 손실 "
           f"{lim['lossPctRange'][0]:g}~{lim['lossPctRange'][1]:g}% · 레버리지 ≤ {lim['maxLeverage']:g}배 · "
           f"메인넷 주문 불가", flush=True)
+    if engine.cfg.adaptive:
+        print(f"[testnet-auto] 감시: 적응형 — 열린 포지션·변동성 급증·BSL/SSL ±{engine.cfg.level_proximity_pct:g}% "
+              f"근접이면 집중 {engine.cfg.focus_interval_min}분, 아니면 {engine.interval_min}분 · "
+              f"AI는 새 후보가 처음 뜰 때만 심사", flush=True)
+    else:
+        print(f"[testnet-auto] 감시: 일반 {engine.interval_min}분 고정"
+              f"(--adaptive 또는 BYBIT_ADAPTIVE=true로 상황 맞춤 감시)", flush=True)
 
 
 def print_record(rec: Dict) -> None:
@@ -980,6 +1233,12 @@ def print_status(engine: TestnetAuto) -> None:
     print(f"        킬스위치 진입 {'가능' if ks['entry']['ok'] else '금지'} ({ks['entry']['reason']}) · "
           f"오늘 체결 {ks['state'].get('trades')}건 · 실현손익 {ks['state'].get('realized_pnl')}",
           flush=True)
+    watch = state.get("watch") or {}
+    if watch:
+        mode = "집중" if watch.get("mode") == "focus" else "일반"
+        why = f" ({' · '.join(watch.get('reasons') or [])})" if watch.get("reasons") else ""
+        print(f"        감시 {mode} {watch.get('interval_min')}분{why} · "
+              f"적응형 {'켜짐' if watch.get('adaptive') else '꺼짐'}", flush=True)
     st = state["stats"]
     win = st.get("win_rate_pct")
     print(f"        누적 체결 {st.get('trades')}건 · 승률 {win if win is not None else '-'}% · "
@@ -989,6 +1248,68 @@ def print_status(engine: TestnetAuto) -> None:
         for row in status["log"][-5:]:
             print(f"         · {row.get('bar_kst')} {row.get('action')} "
                   f"{' | '.join(row.get('events') or [])[:120]}", flush=True)
+
+
+# ---------------------------------------------------------------------- 루프(1분 상태 줄 + 적응형 감시)
+
+def run_live_loop(engine: TestnetAuto, *, quiet: bool = False, tick_sec: int = DEFAULT_TICK_SEC,
+                  max_rounds: Optional[int] = None, clock=None, sleep=None, out=None) -> int:
+    """봉 점검 → 대기 중 60초마다 상태 한 줄 → 다음 점검.
+
+    - 대기를 한 번에 자지 않고 1초씩 끊어 자므로 Ctrl+C가 즉시 먹는다(포지션은 거래소 TP/SL이 계속 관리).
+    - 다음 주기는 마지막 스캔의 watch(상황 맞춤 감시)를 따른다 — 집중이면 5분, 아니면 30분.
+    - clock/sleep/out을 바꿔 넣을 수 있게 해 두어 시간을 기다리지 않고 시험한다.
+    """
+    out = out or (lambda line: print(line, flush=True))
+    clock = clock or (lambda: int(engine.now().timestamp() * 1000))
+    sleep = sleep or time.sleep
+    normal_min = engine.interval_min
+    watch: Dict = {"adaptive": bool(engine.cfg.adaptive), "mode": "normal",
+                   "interval_min": normal_min, "reasons": []}
+    rounds = 0
+    try:
+        while True:
+            rec = None
+            try:
+                rec = engine.tick()
+            except Exception as exc:              # 시세·파일 실패는 이번 스캔 실패로 남기고 계속
+                if not quiet:
+                    out(f"[testnet-auto] 스캔 실패: {exc} — 다음 점검까지 기다립니다")
+            if rec is not None:
+                watch = rec.get("watch") or watch
+                if not quiet:
+                    print_record(rec)
+            rounds += 1
+            if max_rounds is not None and rounds >= int(max_rounds):
+                return 0
+
+            interval = int(watch.get("interval_min") or normal_min)
+            if not engine.cfg.adaptive:
+                interval = normal_min             # 꺼져 있으면 절대 당기지 않는다
+            due = next_scan_ms(clock(), interval)
+            if not quiet:
+                out(f"[testnet-auto] 다음 점검 {_kst(due)} KST · {int(tick_sec)}초마다 상태 한 줄 · "
+                    f"Ctrl+C로 멈춥니다")
+
+            next_tick = clock() + max(1, int(tick_sec)) * 1000
+            while True:                            # due까지 1초씩 끊어 잔다(반응성)
+                now = clock()
+                if now >= due:
+                    break
+                sleep(min(1.0, max(0.05, (due - now) / 1000.0)))
+                now = clock()
+                if quiet or now < next_tick:
+                    continue
+                quote = engine.quote()
+                out(format_live_line(now_ms=now, symbol=engine.cfg.symbol, price=quote.get("price"),
+                                     state=engine.load_state(), watch=watch, due_ms=due,
+                                     note=quote.get("note") or ""))
+                while next_tick <= now:            # 몇 초 밀렸어도 한 줄만 찍고 박자를 맞춘다
+                    next_tick += max(1, int(tick_sec)) * 1000
+    except KeyboardInterrupt:
+        if not quiet:
+            out("\n[testnet-auto] 안전 종료. 열린 포지션이 있으면 거래소의 손절·목표가 계속 걸려 있습니다.")
+        return 0
 
 
 # ---------------------------------------------------------------------- CLI
@@ -1009,6 +1330,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--demo", action="store_true",
                     help="바이비트 Demo Trading(api-demo.bybit.com)으로 돈다 — .env에 데모 키를 넣으세요")
     ap.add_argument("--no-ai", action="store_true", help="AI 심사 없이 규칙만")
+    ap.add_argument("--adaptive", dest="adaptive", action="store_true", default=None,
+                    help="상황 맞춤 감시 — 포지션·변동성 급증·BSL/SSL 근접이면 5분 간격")
+    ap.add_argument("--no-adaptive", dest="adaptive", action="store_false",
+                    help="상황 맞춤 감시 끔(30분 고정)")
+    ap.add_argument("--tick-sec", type=int, default=DEFAULT_TICK_SEC,
+                    help="루프에서 상태 한 줄을 찍는 간격(초, 기본 60)")
+    ap.add_argument("--focus-min", type=int, default=DEFAULT_FOCUS_MIN,
+                    help="집중 감시 대기(분, 기본 5)")
     ap.add_argument("--symbol", default="BTCUSDT")
     ap.add_argument("--source", default="auto", choices=["auto", "bybit", "okx", "bitget", "binance"])
     ap.add_argument("--limit", type=int, default=3000, help="받을 30분봉 수")
@@ -1029,6 +1358,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args(argv)
 
+    # 상황 맞춤 감시: --adaptive/--no-adaptive가 있으면 그것이, 없으면 BYBIT_ADAPTIVE(backend/.env 포함)를 따른다
+    load_env_file()
+    adaptive = args.adaptive if args.adaptive is not None else _env_flag("BYBIT_ADAPTIVE", False)
+
     # 값 검증은 주문 전에 — 잘못된 손실률·레버리지는 만들 때부터 거부한다
     try:
         BybitClient.validate_loss_pct(args.loss_pct)
@@ -1041,6 +1374,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                      loss_pct=args.loss_pct, leverage=args.leverage, target_r=args.target_r,
                      stop_atr=args.stop_atr, max_bars=args.max_bars,
                      time_exit=not args.no_time_exit, replay=bool(args.candles),
+                     adaptive=adaptive, tick_sec=max(5, int(args.tick_sec)),
+                     focus_interval_min=max(1, int(args.focus_min)),
                      state_path=args.state or "", log_path=args.log or "",
                      killswitch_path=args.killswitch or "")
     try:
@@ -1115,24 +1450,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
 
     if args.loop:
-        tf_ms = engine._tf_ms()
         if not args.quiet:
-            print(f"[testnet-auto] {cfg.symbol} {cfg.interval}분봉 · 봉 마감 +{BAR_DELAY_SEC}초마다 점검 · "
-                  f"상태 {engine.state_path}", flush=True)
-        try:
-            while True:
-                once()
-                now_ms = int(engine.now().timestamp() * 1000)
-                target = next_bar_close_ms(now_ms, tf_ms)
-                wait = max(5, round((target - now_ms) / 1000))
-                if not args.quiet:
-                    print(f"[testnet-auto] 다음 점검 {_kst(target)} KST ({wait // 60}분 {wait % 60}초 뒤) — "
-                          f"Ctrl+C로 멈춥니다", flush=True)
-                time.sleep(wait)
-        except KeyboardInterrupt:                    # Ctrl+C — 포지션은 거래소 TP/SL이 계속 관리
-            print("\n[testnet-auto] 안전 종료. 열린 포지션이 있으면 거래소의 손절·목표가 계속 걸려 있습니다.",
-                  flush=True)
-            return 0
+            print(f"[testnet-auto] {cfg.symbol} {cfg.interval}분봉 · 봉 마감 +{BAR_DELAY_SEC}초 점검 · "
+                  f"{cfg.tick_sec}초마다 상태 한 줄 · 상태 {engine.state_path}", flush=True)
+        return run_live_loop(engine, quiet=args.quiet, tick_sec=cfg.tick_sec)
     return once()
 
 

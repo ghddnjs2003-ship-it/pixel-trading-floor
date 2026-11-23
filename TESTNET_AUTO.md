@@ -61,7 +61,7 @@ Demo Trading도 실돈 없는 모의 USDT만 움직이고, V5 REST 경로·서�
 | --- | --- |
 | `run_testnet_auto_mock.bat` | **드라이런** — 키 없이 1회 스캔. "무엇을 할지"만 보여 주고 주문 없음 |
 | `run_testnet_auto_status.bat` | 계좌·포지션·킬스위치·최근 스캔 확인 |
-| `run_testnet_auto.bat` | **실테스트넷 루프** — 30분 봉 마감 +90초마다 자동 점검 (Ctrl+C로 종료) |
+| `run_testnet_auto.bat` | **실테스트넷·데모 루프** — 30분 봉 마감 +90초 점검 · 1분마다 상태 한 줄 · 상황 맞춤 감시(5분) (Ctrl+C로 종료) |
 
 명령어로 직접 돌릴 때:
 
@@ -69,8 +69,10 @@ Demo Trading도 실돈 없는 모의 USDT만 움직이고, V5 REST 경로·서�
 python -m backend.testnet_auto --once --mock     # 1회 드라이런(주문 없음)
 python -m backend.testnet_auto --once            # 1회 실제 점검(테스트넷)
 python -m backend.testnet_auto --once --demo     # 1회 실제 점검(데모 트레이딩)
-python -m backend.testnet_auto --loop            # 계속 자동
+python -m backend.testnet_auto --loop            # 계속 자동(1분마다 상태 한 줄)
 python -m backend.testnet_auto --loop --demo     # 데모로 계속 자동
+python -m backend.testnet_auto --loop --adaptive # 상황 맞춤 감시(집중 5분 / 일반 30분)
+python -m backend.testnet_auto --loop --no-adaptive  # 30분 고정
 python -m backend.testnet_auto --status          # 상태
 python -m backend.testnet_auto --stop            # 신규 진입만 정지(포지션 TP/SL은 유지)
 python -m backend.testnet_auto --resume          # 다시 진입 허용
@@ -80,6 +82,39 @@ python -m backend.testnet_auto --reset           # 로컬 기록 초기화(열�
 - `--stop`은 **돌고 있는 루프에도 바로** 먹습니다. 정지 표시 파일(`data/testnet_auto_pause*.txt`)을 쓰고,
   `--resume`이 지웁니다. (킬스위치 메모리 상태만 바꾸면 다음 저장에 덮여 사라지기 때문입니다.)
 - 같은 상태 파일로 **창을 두 개 띄우면** 잠금(`*.lock`)이 두 번째를 멈춥니다 — 같은 봉에 주문이 두 번 나가는 일을 막습니다.
+
+### 2-1. 1분 상태 줄 + 상황 맞춤 감시(Adaptive)
+
+**① 1분마다 화면이 움직입니다.** 루프는 30분(또는 5분)을 한 번에 자지 않고, 1분마다 한 줄을 찍습니다.
+창이 멈춘 것처럼 보이지 않고, `Ctrl+C`는 1초 안에 먹습니다(열린 포지션은 거래소 TP/SL이 계속 관리).
+
+```
+[testnet-auto] 21:31:30 KST · BTCUSDT 61,402.10 · 포지션 없음 · 감시 일반 30분 · 다음 점검 22:01:30 (30분 00초 남음)
+[testnet-auto] 21:36:30 KST · BTCUSDT 61,388.40 · 보유 롱 0.001 @ 61,150.00 · 평가 +0.24 USDT(+0.27R) ·
+                감시 집중 5분(열린 포지션) · 다음 점검 21:41:30 (5분 00초 남음) · 마지막 스캔 가격
+```
+
+- 시세는 공개 티커(바이비트 `/v5/market/tickers`)로 읽습니다. 조회가 실패하면 **마지막 스캔 가격**으로
+  찍고, 그것도 없으면 `시세 조회 실패`라고만 남깁니다(루프는 계속 돕니다). mock 모드는 고정 시세라 `mock 시세`.
+- `--tick-sec 30`처럼 출력 간격을 바꿀 수 있습니다(기본 60초).
+
+**② 상황이 맞으면 더 자주 봅니다(집중 5분).** 다음 중 **하나라도** 걸리면 다음 대기를 30분 → **5분**으로 줄입니다.
+
+| 조건 | 보는 법 |
+| --- | --- |
+| 열린 포지션 | 내 기록 또는 거래소에 포지션이 있음 — 손익이 움직이는 동안 촘촘히 |
+| 변동성 급증 | 최근 확정 봉의 고가-저가 폭 ≥ 최근 20봉 평균 ATR × 1.5 |
+| BSL/SSL 근접 | 현재가가 최근 스윙 고점(BSL)·저점(SSL) ±0.35% 안쪽 |
+
+- **AI 호출은 늘지 않습니다.** 5분마다 돌아도 Gemini 심사는 **새 M1 후보가 처음 떴을 때만** 부릅니다
+  (`signals_seen`이 같은 신호를 두 번 심사하지 않음). 포지션을 들고 있을 때 새 후보가 와도 AI는 부르지 않습니다.
+- **안전장치는 그대로입니다.** 집중 감시는 '얼마나 자주 보는가'만 바꿉니다. 시드 50달러 상한·1회 손실 2~4%·
+  레버리지 5배 상한·일일 킬스위치·중복 진입 금지·메인넷 차단은 한 줄도 바뀌지 않습니다.
+- 지금 모드와 이유는 스캔 기록(`data/testnet_auto_log*.jsonl`)의 `watch`와 `--status` 화면에 남습니다.
+- 켜는 법: `run_testnet_auto.bat`은 `--adaptive`를 붙여 돌립니다. 직접 돌릴 때는 `--loop --adaptive`,
+  또는 `backend\.env`에 `BYBIT_ADAPTIVE=true`. 끄려면 `--no-adaptive`(또는 `BYBIT_ADAPTIVE=false`).
+- 5분 간격은 봉 마감 +90초 기준의 5분 격자(`:01:30`, `:06:30`, `:11:30` …)입니다. 진입 창(5분)과 같은 박자라
+  집중 감시 중에도 새 봉 신호 진입 시점을 놓치지 않습니다.
 
 ## 3. 한 번의 스캔에서 일어나는 일
 
@@ -123,7 +158,8 @@ python -m backend.testnet_auto --reset           # 로컬 기록 초기화(열�
   거부를 줄이려면 `--loss-pct 4`(예산 2달러) 또는 변동성이 작은 `--symbol ETHUSDT`/`SOLUSDT`를 씁니다.
 - 후보1은 **아시아 세션(00~08 UTC = 09~17 KST)** 진입만 잡습니다. 그 밖의 시간은 관망이 정상입니다.
 - 수수료(테이커 0.055%×2)와 슬리피지 때문에 손절 1회는 예산보다 조금 더 나갈 수 있습니다(실테스트넷 기록 기준).
-- 30분마다만 확인하므로 TP/SL 청산은 **최대 30분 늦게** 기록됩니다(거래소에서 먼저 닫힙니다).
+- 보통 30분마다, 집중 감시(포지션·급변·기준선 근접) 중에는 **5분마다** 확인하므로 TP/SL 청산 기록도 그만큼 빨라집니다
+  (거래소에서는 그 전에 이미 닫혀 있습니다).
 - PC가 꺼지거나 창을 닫으면 루프는 멈춥니다. **이미 열린 포지션의 손절·목표는 거래소에 남아** 계속 관리됩니다.
 - 알림(카톡·문자)은 없습니다. 보고 싶으면 `run_testnet_auto_status.bat` 또는 `data/testnet_auto_log.jsonl`을 봅니다.
 
@@ -146,9 +182,12 @@ python -m backend.testnet_auto --reset           # 로컬 기록 초기화(열�
 python -m pytest backend -q
 ```
 
-`backend/test_testnet_auto.py`가 이 모듈의 38가지를 고정합니다: mock에서 네트워크 주문 0회 ·
+`backend/test_testnet_auto.py`가 이 모듈의 69가지를 고정합니다: mock에서 네트워크 주문 0회 ·
 3ATR 손절·4R 목표·50달러 수량 · AI REJECT·킬스위치·세션 밖·기존 포지션 차단 · 같은 봉 중복 금지 ·
 mock 손절/목표/96봉 청산 · 거래소 청산 기록으로 손익 확정 · 내 기록과 다른 포지션은 건드리지 않음 ·
 paper 파일 불가침 · API 키 비노출 · 수동 정지 파일 · 한 PC에서 두 번 실행 금지(잠금).
 데모 모드는 그 위에 `BYBIT_DEMO` 분기 · `.demo` 상태 파일 분리 · 데모 주문 경로 · 청산 손익 조회가
 404·미지원이어도 루프가 죽지 않음 · 배너 `데모 실주문 - api-demo.bybit.com`을 고정합니다.
+상황 맞춤 감시는 집중 조건 3가지(포지션·변동성·BSL/SSL 근접)와 5분/30분 결정 · 꺼져 있으면 30분 고정 ·
+집중 중에도 50달러·5배 안전장치 유지 · 같은 신호를 두 번 심사하지 않음(AI 절약)을 고정하고,
+1분 상태 줄은 가짜 시계로 '1분마다 한 줄 · 집중이면 5분 뒤 점검 · Ctrl+C 즉시 종료'를 확인합니다.
