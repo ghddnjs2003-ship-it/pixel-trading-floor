@@ -1,5 +1,5 @@
 {
- "updatedAt": "2026-11-22T15:28:05+09:00",
+ "updatedAt": "2026-11-24T06:39:27+09:00",
  "source": "ForexFactory weekly calendar",
  "sourceUrl": "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
  "timezone": "Asia/Seoul",
@@ -39,7 +39,7 @@
    "impactStars": 2,
    "title": "CB 소비자신뢰지수",
    "titleEn": "CB Consumer Confidence",
-   "forecast": "92.1",
+   "forecast": "92.4",
    "previous": "91.7"
   },
   {
@@ -77,18 +77,6 @@
    "titleEn": "Prelim GDP Price Index q/q",
    "forecast": "2.3%",
    "previous": "2.3%"
-  },
-  {
-   "at": "2026-11-25T22:30:00+09:00",
-   "atMs": 1795613400000,
-   "date": "2026-11-25",
-   "time": "22:30",
-   "impact": "medium",
-   "impactStars": 2,
-   "title": "신규 실업수당 청구건수",
-   "titleEn": "Unemployment Claims",
-   "forecast": "201K",
-   "previous": "203K"
   }
  ],
  "note": "미국 주요 지표 · 한국 시간(KST) · 예상/이전은 발표 전 전망치 · 투자 조언이 아님"
