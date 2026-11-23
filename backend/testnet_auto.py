@@ -87,6 +87,7 @@ DEFAULT_ATR_PERIOD = 14     # ATR 기간(전략과 같은 Wilder)
 DEFAULT_ATR_LOOKBACK = 20   # 평균 ATR을 낼 최근 봉 수
 DEFAULT_LEVEL_PCT = 0.35    # BSL/SSL '근접' 폭(%) — 현재가가 이 안쪽이면 집중 감시
 DEFAULT_SWING_LOOKBACK = 20 # BSL/SSL을 잡을 직전 봉 수
+RETRY_SEC = 120             # 스캔이 예외로 끝났을 때 다시 보기까지(전체 주기를 기다리지 않는다)
 
 # 이 모듈이 절대 건드리면 안 되는 파일 이름 — 서버 30분 모의매매가 쓰는 것들
 PAPER_NAMES = ("paper_state.json", "paper_log.jsonl", "paper_killswitch.json",
@@ -1283,13 +1284,19 @@ def run_live_loop(engine: TestnetAuto, *, quiet: bool = False, tick_sec: int = D
             if max_rounds is not None and rounds >= int(max_rounds):
                 return 0
 
-            interval = int(watch.get("interval_min") or normal_min)
-            if not engine.cfg.adaptive:
-                interval = normal_min             # 꺼져 있으면 절대 당기지 않는다
-            due = next_scan_ms(clock(), interval)
-            if not quiet:
-                out(f"[testnet-auto] 다음 점검 {_kst(due)} KST · {int(tick_sec)}초마다 상태 한 줄 · "
-                    f"Ctrl+C로 멈춥니다")
+            if rec is None:                        # 시세·파일 실패 — 30분을 기다리지 않고 2분 뒤 재시도
+                due = clock() + RETRY_SEC * 1000
+                if not quiet:
+                    out(f"[testnet-auto] 다음 점검 {_kst(due)} KST (스캔 실패 — "
+                        f"{RETRY_SEC // 60}분 뒤 다시 시도) · {int(tick_sec)}초마다 상태 한 줄 · Ctrl+C로 멈춥니다")
+            else:
+                interval = int(watch.get("interval_min") or normal_min)
+                if not engine.cfg.adaptive:
+                    interval = normal_min         # 꺼져 있으면 절대 당기지 않는다
+                due = next_scan_ms(clock(), interval)
+                if not quiet:
+                    out(f"[testnet-auto] 다음 점검 {_kst(due)} KST · {int(tick_sec)}초마다 상태 한 줄 · "
+                        f"Ctrl+C로 멈춥니다")
 
             next_tick = clock() + max(1, int(tick_sec)) * 1000
             while True:                            # due까지 1초씩 끊어 잔다(반응성)

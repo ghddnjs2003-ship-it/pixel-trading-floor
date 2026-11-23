@@ -1038,6 +1038,27 @@ class LiveTickerTests(TestnetAutoTestBase):
         self.assertEqual(engine.ticks, 1)
         self.assertLess(clock.sleeps, 400)                        # 1초 단위로 끊어 잔다
 
+    def test_loop_retries_two_minutes_after_a_failed_scan(self):
+        engine = StubEngine()
+        clock = FakeClock(START)
+        seen = []
+        calls = {"n": 0}
+
+        def flaky_tick():
+            seen.append(clock.ms)
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("캔들을 받지 못했습니다")
+            return StubEngine.tick(engine)
+
+        engine.tick = flaky_tick
+        lines = []
+        code = run_live_loop(engine, clock=clock.now, sleep=clock.sleep, out=lines.append,
+                             max_rounds=2)
+        self.assertEqual(code, 0)
+        self.assertEqual(seen[1] - seen[0], 120_000)              # 30분이 아니라 2분 뒤 재시도
+        self.assertIn("스캔 실패", "".join(lines))
+
     def test_quiet_loop_prints_nothing(self):
         engine = StubEngine()
         clock = FakeClock(START)
