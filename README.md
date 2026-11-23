@@ -23,7 +23,7 @@
 - `lite/whale.js`, `lite/whale.css` — `[고래·일정]` 탭: 실시간 TRC20 고래 입출금(50만 달러 이상)과 이번 주 미국 주요 경제 일정
 - `data/calendar.json` — 이번 주 미국 주요 지표(High·Medium)를 한국 시간·한국어로 담은 일정표. `scripts/update-global.py --calendar`가 만들고 `.github/workflows/update-global.yml`이 함께 갱신합니다
 - `data/global.json` — 미 선물·달러 인덱스·원/달러 스냅숏(24시간 스파크 포함). `scripts/update-global.py`가 만들고 `.github/workflows/update-global.yml`이 10분마다 갱신합니다
-- `backend/` — 선택 사항인 Python 서버. 13인 LLM 분석(무료 API·로컬 Ollama 공용 어댑터), **더블 S+MDS v7 룰 엔진**, **과거 캔들 백테스트**, **AI 맥락 필터**(Gemini가 M1 후보를 PASS/REJECT), **실시간 모의매매 루프**(`/api/paper`), **킬스위치**가 있습니다. GitHub Pages에는 쓰이지 않습니다 — `backend/README.md` 참고.
+- `backend/` — 선택 사항인 Python 서버. 13인 LLM 분석(무료 API·로컬 Ollama 공용 어댑터), **더블 S+MDS v7 룰 엔진**, **과거 캔들 백테스트**, **AI 맥락 필터**(Gemini가 M1 후보를 PASS/REJECT), **실시간 모의매매 루프**(`/api/paper`), **킬스위치**, **테스트넷 오토 모드**(모의 50 USDT로 바이비트 테스트넷에 실제 주문)가 있습니다. GitHub Pages에는 쓰이지 않습니다 — `backend/README.md`, 실행 안내는 [`TESTNET_AUTO.md`](TESTNET_AUTO.md).
 
 ## ✨ 픽셀 오피스 ◆ 정밀 분석 = Gemini AI 13인 (2026-11-20)
 
@@ -71,6 +71,18 @@
   - 오늘은 노란 띠로 강조하고, 다가오는 일정은 `3시간 15분 뒤`처럼 10초마다 다시 세며, 지난 일정은 흐리게 `완료`로 바꿉니다. 예상·이전 값이 있으면 함께 적습니다.
   - 일정표가 이번 주 것이 아니면(자동 갱신이 멈췄으면) 화면에 그 사실을 밝힙니다.
 - 휴대폰(≤900px)에서는 실시간 고래가 먼저, 일정이 아래로 쌓입니다. 탭을 벗어나면 TronGrid·TronScan 호출과 타이머를 모두 멈춥니다.
+
+## 🤖 테스트넷 오토 모드 (2026-11-23)
+
+30분봉 후보1(M1)이 서고 Gemini가 PASS를 주면 **바이비트 테스트넷**에 모의 50 USDT로 시장가 주문을 냅니다
+(손절 3ATR·목표 4R·레버리지 3배, 주문에 TP/SL 동봉). **실돈은 움직이지 않습니다** — 주소가
+`api-testnet.bybit.com`으로 고정되어 있고 메인넷 주소·`BYBIT_TESTNET=false`는 코드가 거부합니다.
+
+- 집 PC(Windows)에서 더블클릭으로 돌리는 3개 파일: `run_testnet_auto_mock.bat`(드라이런 1회) ·
+  `run_testnet_auto_status.bat`(상태) · `run_testnet_auto.bat`(30분 봉마다 자동)
+- 코드: `backend/testnet_auto.py` · 주문 클라이언트: `backend/bybit_client.py` · 테스트: `backend/test_testnet_auto.py`
+- 모의매매(`paper_loop`, `data/paper_*.json`)와는 **파일부터 분리**되어 있어 서로를 건드리지 않습니다.
+- 단계·한계·오류 대처는 [`TESTNET_AUTO.md`](TESTNET_AUTO.md).
 
 ## 배포
 

@@ -436,6 +436,31 @@ class BybitClient:
             raise BybitAPIError(-1, f"{symbol} 현재가를 읽지 못했습니다", path="/v5/market/tickers")
         return price
 
+    def get_closed_pnl(self, symbol: str, limit: int = 5) -> List[Dict]:
+        """최근 청산 손익(조회 전용). 포지션이 사라진 뒤 '얼마로 끝났는지'를 거래소 기록으로 확인한다.
+
+        주문을 내지 않는다. mock 모드에는 거래소 기록이 없으므로 예외를 낸다 — 모의 청산 손익은
+        호출하는 쪽(예: testnet_auto)이 확정 봉으로 계산한다.
+        """
+        symbol = symbol.upper()
+        if self.is_mock:
+            raise BybitError("mock 모드에는 거래소 청산 기록이 없습니다 — 청산 손익은 봉으로 계산합니다")
+        data = self._request("GET", "/v5/position/closed-pnl",
+                             {"category": "linear", "symbol": symbol, "limit": str(int(limit))})
+        rows = []
+        for item in (data.get("result") or {}).get("list") or []:
+            rows.append({
+                "symbol": item.get("symbol"),
+                "side": item.get("side"),
+                "qty": _f(item.get("qty") or item.get("closedSize")),
+                "avgEntryPrice": _f(item.get("avgEntryPrice")),
+                "avgExitPrice": _f(item.get("avgExitPrice")),
+                "closedPnl": _f(item.get("closedPnl")),
+                "orderId": item.get("orderId"),
+                "updatedTime": item.get("updatedTime"),
+            })
+        return rows
+
     def get_instrument(self, symbol: str) -> Instrument:
         """종목 규격(minOrderQty·qtyStep·tickSize). 실패하면 확인된 폴백 표로 물러난다(사실은 notes에 남긴다)."""
         symbol = symbol.upper()

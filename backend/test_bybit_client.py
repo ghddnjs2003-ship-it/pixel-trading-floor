@@ -22,6 +22,7 @@ from backend.bybit_client import (
     BybitAPIError,
     BybitClient,
     BybitConfigError,
+    BybitError,
     OrderRejected,
     fmt_dec,
     floor_to_step,
@@ -405,6 +406,21 @@ class OrderPayloadTests(BybitClientTestBase):
         client = self.live_client(transport)
         self.assertIsInstance(client.sync_time(), int)
         self.assertNotEqual(client.sync_time(), 0)
+
+    def test_closed_pnl_is_read_only(self):
+        transport = FakeTransport({"/v5/position/closed-pnl": {"retCode": 0, "result": {"list": [{
+            "symbol": "BTCUSDT", "side": "Sell", "qty": "0.001", "avgEntryPrice": "60000",
+            "avgExitPrice": "60900", "closedPnl": "-0.95", "updatedTime": "1800000000000"}]}}})
+        client = self.live_client(transport)
+        rows = client.get_closed_pnl("BTCUSDT", limit=3)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["side"], "Sell")
+        self.assertAlmostEqual(rows[0]["closedPnl"], -0.95)
+        call = transport.calls[0]
+        self.assertEqual(call["method"], "GET")
+        self.assertEqual(call["params"], {"category": "linear", "symbol": "BTCUSDT", "limit": "3"})
+        with self.assertRaises(BybitError):
+            self.mock_client().get_closed_pnl("BTCUSDT")
 
     def test_instrument_falls_back_when_api_fails(self):
         transport = FakeTransport({
