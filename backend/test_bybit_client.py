@@ -17,6 +17,7 @@ from decimal import Decimal
 
 from backend.bybit_client import (
     DEFAULT_LEVERAGE,
+    DEMO_BASE_URL,
     MAX_SEED_USD,
     TESTNET_BASE_URL,
     BybitAPIError,
@@ -26,10 +27,11 @@ from backend.bybit_client import (
     OrderRejected,
     fmt_dec,
     floor_to_step,
+    risk_limits,
     v5_signature,
 )
 
-ENV_KEYS = ("BYBIT_API_KEY", "BYBIT_API_SECRET", "BYBIT_TESTNET")
+ENV_KEYS = ("BYBIT_API_KEY", "BYBIT_API_SECRET", "BYBIT_TESTNET", "BYBIT_DEMO", "BYBIT_ENV")
 
 
 class FakeTransport:
@@ -130,6 +132,140 @@ class ModeGuardTests(BybitClientTestBase):
         client = BybitClient(testnet=True, transport=no_network)
         self.assertTrue(client.is_mock)
         self.assertEqual(client.base_url, TESTNET_BASE_URL)
+
+
+class DemoModeTests(BybitClientTestBase):
+    """Bybit Demo Trading(api-demo.bybit.com) — 테스트넷과 같은 샌드박스, 메인넷은 여전히 거부."""
+
+    BALANCE = {"/v5/account/wallet-balance": {
+        "retCode": 0, "result": {"list": [{"totalEquity": "50", "coin": [
+            {"coin": "USDT", "equity": "50", "walletBalance": "50", "availableToWithdraw": "50"}]}]}}}
+
+    def demo_client(self, transport=None, **kwargs):
+        kwargs.setdefault("api_key", "demo-key")
+        kwargs.setdefault("api_secret", "demo-secret")
+        return BybitClient(transport=transport or FakeTransport(self.BALANCE), **kwargs)
+
+    def test_demo_env_var_selects_demo_base_url(self):
+        os.environ["BYBIT_DEMO"] = "true"
+        transport = FakeTransport(self.BALANCE)
+        client = self.demo_client(transport)
+        self.assertEqual(client.env, "demo")
+        self.assertEqual(client.base_url, DEMO_BASE_URL)
+        self.assertFalse(client.testnet)              # '테스트넷인가'는 False (데모이지 테스트넷은 아니다)
+        self.assertTrue(client.sandbox)
+        self.assertFalse(client.is_mock)
+        self.assertEqual(client.get_balance()["equity"], 50.0)
+        self.assertTrue(any("api-demo.bybit.com" in note for note in client.notes))
+
+    def test_demo_env_alias_bybit_env(self):
+        os.environ["BYBIT_ENV"] = "demo"
+        client = self.demo_client()
+        self.assertEqual(client.env, "demo")
+        self.assertEqual(client.base_url, DEMO_BASE_URL)
+
+    def test_demo_wins_over_testnet_when_both_true(self):
+        os.environ["BYBIT_DEMO"] = "true"
+        os.environ["BYBIT_TESTNET"] = "true"
+        client = self.demo_client()
+        self.assertEqual(client.env, "demo")
+        self.assertEqual(client.base_url, DEMO_BASE_URL)
+
+    def test_demo_runs_even_with_bybit_testnet_false(self):
+        os.environ["BYBIT_DEMO"] = "true"
+        os.environ["BYBIT_TESTNET"] = "false"
+        client = self.demo_client()
+        self.assertEqual(client.env, "demo")
+        self.assertEqual(client.base_url, DEMO_BASE_URL)
+
+    def test_demo_false_keeps_testnet(self):
+        os.environ["BYBIT_DEMO"] = "false"
+        os.environ["BYBIT_TESTNET"] = "true"
+        client = self.demo_client()
+        self.assertEqual(client.env, "testnet")
+        self.assertEqual(client.base_url, TESTNET_BASE_URL)
+
+    def test_both_false_is_still_refused(self):
+        os.environ["BYBIT_DEMO"] = "false"
+        os.environ["BYBIT_TESTNET"] = "false"
+        with self.assertRaises(BybitConfigError) as ctx:
+            BybitClient(api_key="k", api_secret="s", transport=no_network)
+        self.assertIn("실전", str(ctx.exception))
+        self.assertIn("BYBIT_TESTNET", str(ctx.exception))
+
+    def test_mainnet_stays_refused_in_demo_env(self):
+        os.environ["BYBIT_DEMO"] = "true"
+        for url in ("https://api.bybit.com", "https://api.bybit.com/",
+                    "http://api-demo.bybit.com", "https://api-demo.bybit.com.evil.com"):
+            with self.subTest(url=url), self.assertRaises(BybitConfigError):
+                BybitClient(api_key="k", api_secret="s", base_url=url, transport=no_network)
+
+    def test_demo_base_url_alone_selects_demo(self):
+        client = self.demo_client(base_url="https://api-demo.bybit.com/")
+        self.assertEqual(client.env, "demo")
+        self.assertEqual(client.base_url, DEMO_BASE_URL)
+
+    def test_env_argument_and_conflicting_base_url_is_refused(self):
+        with self.assertRaises(BybitConfigError):
+            BybitClient(api_key="k", api_secret="s", env="demo",
+                        base_url=TESTNET_BASE_URL, transport=no_network)
+
+    def test_env_argument_rejects_mainnet(self):
+        for env in ("mainnet", "live", "production"):
+            with self.subTest(env=env), self.assertRaises(BybitConfigError):
+                BybitClient(api_key="k", api_secret="s", env=env, transport=no_network)
+
+    def test_unknown_demo_value_is_refused(self):
+        os.environ["BYBIT_DEMO"] = "maybe"
+        with self.assertRaises(BybitConfigError):
+            BybitClient(api_key="k", api_secret="s", transport=no_network)
+
+    def test_mode_and_limits_report_demo(self):
+        os.environ["BYBIT_DEMO"] = "true"
+        mode = self.demo_client().mode()
+        self.assertEqual(mode["env"], "demo")
+        self.assertEqual(mode["baseUrl"], DEMO_BASE_URL)
+        self.assertTrue(mode["demo"])
+        self.assertFalse(mode["testnet"])
+        self.assertTrue(mode["sandbox"])
+        self.assertEqual(mode["label"], "데모 트레이딩")
+        limits = risk_limits("demo")
+        self.assertTrue(limits["sandboxOnly"])
+        self.assertEqual(limits["baseUrl"], DEMO_BASE_URL)
+        self.assertEqual(limits["envBaseUrls"]["testnet"], TESTNET_BASE_URL)
+        self.assertIn("demo", repr(self.demo_client()))
+
+    def test_demo_order_and_close_use_demo_base_with_same_signing(self):
+        os.environ["BYBIT_DEMO"] = "true"
+        transport = FakeTransport({
+            "/v5/market/instruments-info": {"retCode": 0, "result": {"list": [{
+                "symbol": "BTCUSDT",
+                "lotSizeFilter": {"minOrderQty": "0.001", "qtyStep": "0.001", "maxOrderQty": "100"},
+                "priceFilter": {"tickSize": "0.10"}}]}},
+            "/v5/position/set-leverage": {"retCode": 0, "result": {}},
+            "/v5/order/create": {"retCode": 0, "result": {"orderId": "demo-1"}},
+        })
+        client = self.demo_client(transport)
+        order = client.place_market_order("BTCUSDT", "Buy", stop_loss=59000, take_profit=62000,
+                                          entry_price=60000, balance=50.0)
+        self.assertEqual(client.base_url, DEMO_BASE_URL)
+        self.assertEqual(order["orderId"], "demo-1")
+        create = [c for c in transport.calls if c["path"] == "/v5/order/create"][0]
+        body_text = json.dumps(create["body"], separators=(",", ":"), ensure_ascii=False)
+        self.assertEqual(
+            create["headers"]["X-BAPI-SIGN"],
+            v5_signature("demo-secret", create["headers"]["X-BAPI-TIMESTAMP"], "demo-key", "5000",
+                         body_text))
+        self.assertEqual(create["body"]["qty"], "0.001")
+
+    def test_demo_closed_pnl_error_is_visible_as_api_error(self):
+        # 데모에서 부가 조회가 404/미지원이면 BybitAPIError로 드러난다 — 감싸는 것은 호출하는 쪽(testnet_auto)
+        os.environ["BYBIT_DEMO"] = "true"
+        transport = FakeTransport({"/v5/position/closed-pnl": {
+            "retCode": 404, "retMsg": "Not Found"}})
+        with self.assertRaises(BybitAPIError) as ctx:
+            self.demo_client(transport).get_closed_pnl("BTCUSDT")
+        self.assertEqual(ctx.exception.ret_code, 404)
 
 
 class SignatureTests(BybitClientTestBase):

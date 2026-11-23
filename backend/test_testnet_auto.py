@@ -11,23 +11,25 @@
 7) 모의매매(paper_*) 파일은 읽지도 쓰지도 않는다 · 상태·로그에 API 키가 들어가지 않는다
 """
 
+import io
 import json
 import os
 import tempfile
 import time
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 from backend.ai_filter import FilterConfig
-from backend.bybit_client import BybitClient, TESTNET_BASE_URL
+from backend.bybit_client import DEMO_BASE_URL, TESTNET_BASE_URL, BybitClient, BybitConfigError
 from backend.testnet_auto import (AutoConfig, RunLock, TestnetAuto, build_client, main,
-                                  next_bar_close_ms)
+                                  next_bar_close_ms, print_banner)
 
 TF = 1_800_000                     # 30분
 START = 1_790_000_000_000          # 2026-09-19 14:00 UTC → 진입 봉은 02:00 UTC(아시아 세션)
 PRICE = 60_000.0
 ATR = 300.0                        # 3ATR = 900 → 0.001개 손실 $0.90 (예산 $1.50 안)
-ENV_KEYS = ("BYBIT_API_KEY", "BYBIT_API_SECRET", "BYBIT_TESTNET")
+ENV_KEYS = ("BYBIT_API_KEY", "BYBIT_API_SECRET", "BYBIT_TESTNET", "BYBIT_DEMO", "BYBIT_ENV")
 
 
 def no_network(*_args, **_kwargs):
@@ -172,6 +174,154 @@ class ModeTests(TestnetAutoTestBase):
         expected = (START // TF + 1) * TF + 90_000
         self.assertEqual(next_bar_close_ms(now, TF), expected)
         self.assertEqual(next_bar_close_ms(expected, TF), expected + TF)
+
+
+class DemoModeTests(TestnetAutoTestBase):
+    """바이비트 Demo Trading(api-demo.bybit.com) — 테스트넷과 같은 흐름, 기록은 따로, 부가 조회 실패는 견딘다."""
+
+    def live_demo(self, responses):
+        transport = FakeTransport(responses)
+        client = BybitClient(api_key="k", api_secret="s", env="demo", transport=transport)
+        return client, transport
+
+    def test_build_client_uses_demo_env_var(self):
+        os.environ["BYBIT_API_KEY"] = "k"
+        os.environ["BYBIT_API_SECRET"] = "s"
+        os.environ["BYBIT_DEMO"] = "true"
+        client = build_client()
+        self.assertEqual(client.env, "demo")
+        self.assertEqual(client.base_url, DEMO_BASE_URL)
+        self.assertFalse(client.is_mock)
+
+    def test_build_client_env_argument_selects_demo(self):
+        os.environ["BYBIT_API_KEY"] = "k"
+        os.environ["BYBIT_API_SECRET"] = "s"
+        client = build_client(env="demo")
+        self.assertEqual(client.env, "demo")
+        self.assertEqual(client.base_url, DEMO_BASE_URL)
+
+    def test_force_mock_keeps_demo_env_but_no_order(self):
+        client = build_client(force_mock=True, env="demo")
+        self.assertTrue(client.is_mock)
+        self.assertEqual(client.env, "demo")
+        self.assertEqual(client.base_url, DEMO_BASE_URL)
+
+    def test_demo_state_paths_are_separate_from_testnet(self):
+        client = BybitClient(api_key="k", api_secret="s", env="demo", transport=no_network)
+        engine = TestnetAuto(self.cfg, client=client, ai=False)
+        self.assertEqual(engine.mode, "demo")
+        self.assertEqual(engine.env, "demo")
+        self.assertTrue(engine.state_path.endswith("testnet_auto_state.demo.json"))
+        self.assertTrue(engine.log_path.endswith("testnet_auto_log.demo.jsonl"))
+        self.assertTrue(engine.pause_path.endswith("testnet_auto_pause.demo.txt"))
+        state = engine.load_state()
+        self.assertEqual(state["mode"], "demo")
+        self.assertEqual(state["rule"]["env"], "demo")
+        self.assertEqual(state["rule"]["base_url"], DEMO_BASE_URL)
+        self.assertTrue(state["rule"]["testnet_only"])
+        # 테스트넷 엔진은 같은 폴더라도 다른 파일을 쓴다
+        testnet_engine = TestnetAuto(self.cfg, client=BybitClient(api_key="", api_secret=""), ai=False)
+        self.assertTrue(testnet_engine.state_path.endswith("testnet_auto_state.mock.json"))
+
+    def test_demo_signal_places_order_on_demo_base(self):
+        client, transport = self.live_demo({
+            "/v5/account/wallet-balance": BALANCE_50,
+            "/v5/position/list": NO_POSITIONS,
+            "/v5/market/tickers": {"retCode": 0, "result": {"list": [{"lastPrice": "60100"}]}},
+            "/v5/market/instruments-info": {"retCode": 0, "result": {"list": [{
+                "symbol": "BTCUSDT",
+                "lotSizeFilter": {"minOrderQty": "0.001", "qtyStep": "0.001", "maxOrderQty": "100"},
+                "priceFilter": {"tickSize": "0.10"}}]}},
+            "/v5/position/set-leverage": {"retCode": 0, "result": {}},
+            "/v5/order/create": {"retCode": 0, "result": {"orderId": "demo-1"}},
+        })
+        engine = self.engine(ai=FakeAI(), client=client)
+        self.assertEqual(engine.mode, "demo")
+        rec = self.tick(engine)
+        self.assertEqual(rec["action"], "OPEN")
+        self.assertEqual(rec["mode"], "demo")
+        self.assertEqual(rec["base_url"], DEMO_BASE_URL)
+        self.assertTrue(rec["sandbox_only"])
+        self.assertEqual(rec["order"]["orderId"], "demo-1")
+        self.assertIn("/v5/order/create", [c["path"] for c in transport.calls])
+        state = json.loads(Path(engine.state_path).read_text(encoding="utf-8"))
+        self.assertEqual(state["mode"], "demo")
+        self.assertEqual(state["position"]["mode"], "demo")
+        self.assertEqual(state["position"]["order_id"], "demo-1")
+
+    def test_demo_closed_pnl_404_does_not_kill_the_loop(self):
+        client, transport = self.live_demo({
+            "/v5/account/wallet-balance": BALANCE_50,
+            "/v5/position/list": NO_POSITIONS,
+            "/v5/position/closed-pnl": {"retCode": 404, "retMsg": "Not Found"},
+        })
+        engine = self.engine(ai=FakeAI(), client=client)
+        engine.save_state({**engine.load_state(), "position": {
+            "side": "Sell", "qty": "0.001", "entry": PRICE + 100, "stop": PRICE + 1000,
+            "target": PRICE - 3500, "leverage": 3.0, "risk_usd": 0.9, "order_id": "demo-2",
+            "mode": "demo", "signal_time": self.candles[-1]["t"] - TF,
+            "entry_bar_time": self.candles[-1]["t"], "entry_time": "2026-09-19T00:00:00+00:00",
+            "ai": {"decision": "PASS"}}})
+        rec = self.tick(engine, signals=[])
+        self.assertEqual(rec["action"], "CLOSE")          # 청산 자체는 기록하고 루프는 계속
+        self.assertIn("손익", " ".join(rec["events"]))
+        state = json.loads(Path(engine.state_path).read_text(encoding="utf-8"))
+        trade = state["closed"][-1]
+        self.assertIsNone(trade["pnl"])
+        self.assertIn("미확인", trade.get("note", ""))
+        self.assertIn("데모", trade.get("note", ""))
+        self.assertNotIn("/v5/order/create", [c["path"] for c in transport.calls])
+
+    def test_unsupported_extra_lookup_never_raises(self):
+        class BrokenPnl(BybitClient):
+            def get_closed_pnl(self, symbol, limit=5):
+                raise RuntimeError("데모에서 이 조회는 지원되지 않습니다")
+
+        client = BrokenPnl(api_key="k", api_secret="s", env="demo", transport=no_network)
+        engine = self.engine(ai=FakeAI(), client=client)
+        state = engine.load_state()
+        state["position"] = {"side": "Sell", "qty": "0.001", "entry": PRICE, "stop": PRICE + 900,
+                            "target": PRICE - 3600, "risk_usd": 0.9, "signal_time": 1,
+                            "entry_bar_time": self.candles[-1]["t"]}
+        trade = engine._record_exchange_close(state, state["position"], {"equity": 50.0})
+        self.assertIsNone(trade["pnl"])
+        self.assertIsNone(state["position"])
+
+    def test_banner_says_demo_and_base_url(self):
+        client = BybitClient(api_key="k", api_secret="s", env="demo", transport=no_network)
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            print_banner(TestnetAuto(self.cfg, client=client, ai=False))
+        out = buf.getvalue()
+        self.assertIn("데모 실주문", out)
+        self.assertIn("api-demo.bybit.com", out)
+        self.assertIn("모의 USDT만 움직입니다", out)
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            print_banner(self.engine(ai=False))
+        self.assertIn("mock", buf.getvalue())
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            print_banner(TestnetAuto(self.cfg, ai=False,
+                                     client=BybitClient(api_key="k", api_secret="s",
+                                                        transport=no_network)))
+        self.assertIn("테스트넷 실주문", buf.getvalue())
+
+    def test_cli_demo_flag_status_works_in_mock(self):
+        code = main(["--status", "--mock", "--demo", "--quiet",
+                     "--state", os.path.join(self.dir, "demo_state.json"),
+                     "--log", os.path.join(self.dir, "demo_log.jsonl"),
+                     "--killswitch", os.path.join(self.dir, "demo_ks.json")])
+        self.assertEqual(code, 0)
+
+    def test_non_sandbox_client_is_refused(self):
+        class MainnetClient:
+            env = "mainnet"
+            is_mock = False
+            base_url = "https://api.bybit.com"
+
+        with self.assertRaises(BybitConfigError):
+            TestnetAuto(self.cfg, client=MainnetClient(), ai=False)
 
 
 class EntryTests(TestnetAutoTestBase):

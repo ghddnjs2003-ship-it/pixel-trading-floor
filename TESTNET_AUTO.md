@@ -1,8 +1,11 @@
-# 테스트넷 오토 모드 — 퇴근 후 집 PC에서 50달러로 돌려 보기
+# 테스트넷·데모 오토 모드 — 퇴근 후 집 PC에서 50달러로 돌려 보기
 
-`backend/testnet_auto.py`가 30분봉 후보1(M1)을 찾고 Gemini가 PASS를 주면, **바이비트 테스트넷**에
-모의 50 USDT로 시장가 주문(손절·목표 동봉)을 냅니다. 실돈은 움직이지 않습니다 —
-주소가 `api-testnet.bybit.com`으로 고정되어 있고, 메인넷 주소·`BYBIT_TESTNET=false`는 코드가 거부합니다.
+`backend/testnet_auto.py`가 30분봉 후보1(M1)을 찾고 Gemini가 PASS를 주면, **바이비트 테스트넷**
+또는 **Demo Trading**에 모의 50 USDT로 시장가 주문(손절·목표 동봉)을 냅니다. 실돈은 움직이지 않습니다 —
+주소가 `api-testnet.bybit.com`(테스트넷)과 `api-demo.bybit.com`(데모) 두 곳으로만 고정되어 있고,
+메인넷 주소·`BYBIT_TESTNET=false`는 코드가 거부합니다.
+
+> **한국 IP에서는 테스트넷 키 발급이 막혀(오류 10024)** Demo Trading 키를 쓸 수 있습니다. → 아래 1-1절.
 
 ## 1. 준비 (한 번만)
 
@@ -25,6 +28,33 @@
    - Gemini 키(`GEMINI_API_KEY`)는 이미 들어 있으니 그대로 두면 AI 심사가 함께 돕니다.
    - 키가 비어 있으면 **mock 모드**로 돌아 실제 주문이 나가지 않습니다(드라이런).
 
+### 1-1. 테스트넷 키가 안 만들어질 때 — Demo Trading으로
+
+한국 IP에서는 `testnet.bybit.com` 키 생성이 Bybit 규제(오류 `10024`)로 막힙니다. 이때는
+[bybit.com](https://www.bybit.com)의 **Demo Trading**(모의투자) 계정에서 API 키를 발급받아 씀니다.
+Demo Trading도 실돈 없는 모의 USDT만 움직이고, V5 REST 경로·서명 방식이 테스트넷과 같습니다(주소만 다름).
+
+1. 바이비트 로그인 → 우상단 **Demo Trading**으로 전환 → 계정 설정에서 **API 키** 생성(모의투자 키).
+2. `backend\.env`에 키를 넣고 **테스트넷 줄은 그대로 둔 채 한 줄만 더** 켭니다.
+
+   ```
+   BYBIT_API_KEY=데모_키
+   BYBIT_API_SECRET=데모_시크릿
+   BYBIT_TESTNET=true      # 그대로 둡니다(데모가 이깁니다)
+   BYBIT_DEMO=true         # ← 이것만 추가 (또는 BYBIT_ENV=demo)
+   ```
+
+3. 잘 붙었는지 확인: `python -m backend.testnet_auto --status` → 첫 줄이
+   `모드 demo(데모 트레이딩) · BTCUSDT · 주소 https://api-demo.bybit.com`이고 잔고가 보이면 끝입니다.
+   루프를 돌릴 때는 `--demo`를 붙여도 같은 결과입니다(`python -m backend.testnet_auto --loop --demo`).
+
+- 환경을 고르는 순서: **`--demo`/`env` 인자 > `BYBIT_DEMO` > `BYBIT_ENV` > `BYBIT_TESTNET` > 기본(테스트넷)**.
+  `BYBIT_DEMO=true`와 `BYBIT_TESTNET=true`가 둘 다 켜져 있으면 **데모가 이깁니다**.
+- `BYBIT_DEMO=false` + `BYBIT_TESTNET=false`처럼 둘 다 끄면 남는 것은 **실전 메인넷뿐이라 거부**합니다.
+- 데모 계좌는 테스트넷과 **다른 계좌**이다 보니 상태 파일도 `.demo`가 붙어 따로 쌓입니다(5절).
+- 데모 계정은 청산 손익(`/v5/position/closed-pnl`) 같은 **부가 조회가 제한**될 수 있습니다. 그때 청산은
+  그대로 기록되고 손익만 '미확인'으로 남으며, 주문·포지션 관리(잔고·포지션·주문)는 계속 돕니다.
+
 ## 2. 세 번 눌러 보기 (더블클릭)
 
 | 파일 | 하는 일 |
@@ -37,8 +67,10 @@
 
 ```powershell
 python -m backend.testnet_auto --once --mock     # 1회 드라이런(주문 없음)
-python -m backend.testnet_auto --once            # 1회 실제 테스트넷 점검
+python -m backend.testnet_auto --once            # 1회 실제 점검(테스트넷)
+python -m backend.testnet_auto --once --demo     # 1회 실제 점검(데모 트레이딩)
 python -m backend.testnet_auto --loop            # 계속 자동
+python -m backend.testnet_auto --loop --demo     # 데모로 계속 자동
 python -m backend.testnet_auto --status          # 상태
 python -m backend.testnet_auto --stop            # 신규 진입만 정지(포지션 TP/SL은 유지)
 python -m backend.testnet_auto --resume          # 다시 진입 허용
@@ -64,18 +96,19 @@ python -m backend.testnet_auto --reset           # 로컬 기록 초기화(열�
 
 | 항목 | 값 |
 | --- | --- |
-| 거래소 | `api-testnet.bybit.com` 고정 · 메인넷 주문 불가 |
+| 거래소 | `api-testnet.bybit.com`(테스트넷) 또는 `api-demo.bybit.com`(데모) 고정 · 메인넷 주문 불가 |
 | 시드 상한 | 50 USDT (잔고가 커도 50까지만 계산) |
 | 1회 손실 예산 | 기준자본의 2~4% (기본 3% = 1.5 USDT) — 범위 밖은 주문 거부 |
 | 레버리지 | 1~5배 (기본 3배) |
 | 수량 | 종목 qtyStep으로 내림, 최소 수량 손실이 예산을 넘으면 **주문하지 않음** |
 | 중복 | 한 종목 한 포지션 · 같은 봉·같은 신호는 두 번 처리하지 않음 |
 | 킬스위치 | 일일 손실 3%·3연속 손절·하루 20회·급변 2.5% → 30분 정지 (`.env`의 `KILL_*`로 조정) |
-| 격리 | `paper_loop`의 `data/paper_*.json`은 읽지도 쓰지도 않음. mock은 `*.mock.json`에 따로 기록 |
+| 격리 | `paper_loop`의 `data/paper_*.json`은 읽지도 쓰지도 않음. mock·테스트넷·데모는 서로 다른 파일(`*.mock` / `*.demo`) |
 
 ## 5. 기록 파일
 
 - `data/testnet_auto_state.json` — 포지션·청산·통계·킬스위치 (실테스트넷)
+- `data/testnet_auto_state.demo.json` — 데모 트레이딩 기록(계좌가 달라 파일도 따로, `log`·`killswitch`도 같음)
 - `data/testnet_auto_log.jsonl` — 스캔마다 한 줄: 봉·판정·사유·주문·손익
 - `data/testnet_auto_killswitch.json` — 오늘의 손실·연속 손절
 - 드라이런은 같은 이름에 `.mock`이 붙습니다(`testnet_auto_state.mock.json`).
@@ -100,7 +133,9 @@ python -m backend.testnet_auto --reset           # 로컬 기록 초기화(열�
 | --- | --- |
 | `Bybit 오류 10002` | PC 시각이 거래소와 많이 다름 — 실행할 때 자동으로 맞추지만, 계속 나면 Windows 시간 동기화 |
 | `Bybit 오류 10003 / 10004` | 키가 틀렸거나 권한 없음 — `backend\.env`의 키·권한(Contract Read-Write) 확인 |
-| `Bybit ConfigError: 실전(메인넷) 거래는 …` | `BYBIT_TESTNET=false`이거나 메인넷 주소 — `true`로 되돌립니다 |
+| `Bybit ConfigError: 실전(메인넷) 거래는 …` | `BYBIT_TESTNET=false`이거나 메인넷 주소 — `true`로 되돌립니다(데모는 `BYBIT_DEMO=true`) |
+| `모드 demo`인데 `10003/10004` | 데모 키가 아닌 일반 키를 넣었을 수 있음 — Demo Trading에서 발급한 키인지 확인 |
+| 청산 뒤 `손익 미확인` | 데모에서 청산 손익 조회가 제한된 경우 — 청산은 기록되고 포지션은 비워집니다 |
 | `캔들을 받지 못했습니다` | 공개 API 일시 차단 — 잠시 뒤 다시, 또는 `--source okx` |
 | `거래소 조회 실패` | 네트워크·키 문제 — 스캔을 멈췄을 뿐 주문은 나가지 않았습니다 |
 | `키 없음 — mock` | `.env`에 `BYBIT_API_KEY`/`BYBIT_API_SECRET`가 비어 있음 |
@@ -115,3 +150,5 @@ python -m pytest backend -q
 3ATR 손절·4R 목표·50달러 수량 · AI REJECT·킬스위치·세션 밖·기존 포지션 차단 · 같은 봉 중복 금지 ·
 mock 손절/목표/96봉 청산 · 거래소 청산 기록으로 손익 확정 · 내 기록과 다른 포지션은 건드리지 않음 ·
 paper 파일 불가침 · API 키 비노출 · 수동 정지 파일 · 한 PC에서 두 번 실행 금지(잠금).
+데모 모드는 그 위에 `BYBIT_DEMO` 분기 · `.demo` 상태 파일 분리 · 데모 주문 경로 · 청산 손익 조회가
+404·미지원이어도 루프가 죽지 않음 · 배너 `데모 실주문 - api-demo.bybit.com`을 고정합니다.

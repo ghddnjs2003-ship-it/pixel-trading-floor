@@ -1,22 +1,26 @@
-"""테스트넷 오토 모드 — 두뇌(후보1 + AI 심사)와 손(바이비트 테스트넷 주문)을 실제로 잇는 실행 모듈.
+"""테스트넷·데모 오토 모드 — 두뇌(후보1 + AI 심사)와 손(바이비트 샌드박스 주문)을 실제로 잇는 실행 모듈.
 
 무엇을 하나
 1) 30분봉을 받아 **확정 봉만** 쓰고(진행 중 봉은 버린다), 마지막 확정 봉에 후보1(M1)이 섰는지 본다.
 2) 세션(아시아) → 킬스위치 → AI 맥락 필터(PASS/REJECT) 순으로 통과시킨다. 판정·사유는 로그에 남긴다.
-3) 통과하면 다음 봉 시가를 기준으로 3ATR 손절·4R 목표를 계산해 **바이비트 테스트넷에 시장가 주문**을 낸다.
+3) 통과하면 다음 봉 시가를 기준으로 3ATR 손절·4R 목표를 계산해 **바이비트 테스트넷 또는 Demo Trading에
+   시장가 주문**을 낸다(어느 쪽인지는 클라이언트 환경을 따른다).
    수량·명목가·손실 예산은 `bybit_client`의 50달러 규칙이 정한다(여기서 따로 계산하지 않는다).
 4) 열린 포지션은 거래소에 걸어 둔 TP/SL이 닫는다. 이 모듈은 ① 포지션이 아직 있는지 ② 96봉 시간 청산인지
    만 보고, 청산이 확인되면 거래소 청산 기록(`/v5/position/closed-pnl`)으로 손익을 남긴다.
    mock 모드에는 거래소가 없으므로 확정 봉의 고가·저가로 손절·목표·시간 청산을 흉내 낸다.
 
 지키는 선
-- **테스트넷 전용**: 주소는 `https://api-testnet.bybit.com` 고정, 메인넷 거부, 시드 상한 50 USDT,
-  1회 손실 2~4%, 레버리지 5배 상한 — 모두 `bybit_client`가 강제한다. 이 모듈은 그 클라이언트만 쓴다.
+- **샌드박스 전용**: 주소는 `https://api-testnet.bybit.com`(테스트넷) 또는 `https://api-demo.bybit.com`
+  (Demo Trading) 둘만 허용하고 메인넷은 거부한다. 시드 상한 50 USDT, 1회 손실 2~4%, 레버리지 5배 상한
+  — 모두 `bybit_client`가 강제한다. 이 모듈은 그 클라이언트만 쓴다.
+- **환경별 기록 분리**: 테스트넷과 데모는 서로 다른 계좌이므로 상태 파일도 다르게 쓴다
+  (테스트넷 `testnet_auto_state.json` / 데모 `testnet_auto_state.demo.json` / mock `*.mock.json`).
+- **부가 조회 실패는 루프를 죽이지 않는다**: 데모 계정은 청산 손익(`closed-pnl`) 같은 부가 조회가 제한될
+  수 있어, 그 실패는 '손익 미확인'으로 남기고 주문·포지션 관리(핵심 호출)는 계속한다.
 - **모의매매와 분리**: 서버에서 30분마다 도는 `paper_loop`의 `data/paper_state.json`·`paper_log.jsonl`·
   `paper_killswitch.json`은 읽지도 쓰지도 않는다. 이 모듈의 상태는 `data/testnet_auto_*.json`뿐이고,
   경로가 paper 파일을 가리키면 만들 때부터 거부한다(`_assert_paths_safe`).
-- **mock 상태 분리**: 키가 없거나 `--mock`이면 `*.mock.json`을 쓴다. mock에서 잡은 가짜 포지션이
-  나중에 실제 테스트넷 진입을 막는 일이 없게 하려는 것이다.
 - **중복 진입 금지**: 내 기록에 포지션이 있거나, 거래소에 포지션이 있으면(수동 진입 포함) 신규 진입을 건너뛴다.
   거래소 포지션이 내 기록과 다르면(수동 변경 의심) 손대지 않고 로그만 남긴다 — 남의 포지션을 닫지 않는다.
 - **동시 실행 금지**: 같은 상태 파일에 두 프로세스가 붙으면 같은 봉에 주문이 두 번 나갈 수 있다.
@@ -26,12 +30,15 @@
 
 실행
     python -m backend.testnet_auto --once                 # 1회 점검·판단(키 없으면 mock)
+    python -m backend.testnet_auto --once --demo          # 데모 트레이딩(api-demo)으로 1회
     python -m backend.testnet_auto --once --mock          # 키가 있어도 mock 드라이런
     python -m backend.testnet_auto --loop                 # 30분 봉 마감 +90초마다 계속(Ctrl+C 종료)
     python -m backend.testnet_auto --status               # 계좌·포지션·킬스위치·최근 기록
     python -m backend.testnet_auto --stop / --resume      # 신규 진입 정지 / 해제(돌고 있는 루프에도 먹힘)
     python -m backend.testnet_auto --once --candles data/btc_15m_3600.json   # 오프라인 재생(주문 없음)
     run_testnet_auto.bat                                  # Windows: 위 --loop을 더블클릭으로
+
+환경 선택(BYBIT_DEMO / BYBIT_TESTNET / --demo)은 `bybit_client`가 정한다.
 """
 
 from __future__ import annotations
@@ -48,8 +55,8 @@ from typing import Dict, List, Optional, Sequence
 
 from .ai_filter import AIFilter, build_context, nominee_setup, prepare_series
 from .backtest import BacktestConfig, INTERVAL_MS, in_session, load_candles, session_hours
-from .bybit_client import (BybitAPIError, BybitClient, BybitConfigError, BybitError,
-                           OrderRejected, risk_limits)
+from .bybit_client import (ENV_LABELS, SANDBOX_ENVS, BybitAPIError, BybitClient,
+                           BybitConfigError, BybitError, OrderRejected, risk_limits)
 from .config import ai_filter_enabled, get_ai_filter_config, get_killswitch_rules
 from .risk import KillSwitch
 from .strategy import Engine, Params
@@ -124,9 +131,15 @@ class TestnetAuto:
                  ai=None, fetch=None, killswitch: Optional[KillSwitch] = None, now=None):
         self.cfg = cfg or AutoConfig()
         self.client = client if client is not None else BybitClient()
-        if not getattr(self.client, "testnet", False):
-            raise BybitConfigError("테스트넷 클라이언트만 씁니다 — BybitClient의 testnet 가드가 꺼져 있습니다")
+        env = getattr(self.client, "env", None)
+        if env is None:                       # env 속성이 없는 예전·가짜 클라이언트 호환
+            env = "testnet" if getattr(self.client, "testnet", False) else None
+        if env not in SANDBOX_ENVS:
+            raise BybitConfigError(
+                "테스트넷·데모 클라이언트만 씁니다 — BybitClient의 샌드박스 가드가 꺼져 있습니다")
+        self.env = env
         self.mock = bool(self.client.is_mock)
+        self.mode = "mock" if self.mock else env      # "mock" | "testnet" | "demo"
         self.ai = ai                     # None = 설정에서 만든다, False = AI 없이 규칙만
         self.fetch = fetch or self._fetch_default
         self.now = now or (lambda: datetime.now(timezone.utc))
@@ -138,7 +151,12 @@ class TestnetAuto:
     # ------------------------------------------------------------------ 경로
     def _resolve_paths(self):
         base = Path(self.cfg.data_dir)
-        suffix = ".mock" if self.mock else ""
+        if self.mock:
+            suffix = ".mock"                 # 드라이런 — 가짜 포지션이 실주문을 막지 않게
+        elif self.env == "demo":
+            suffix = ".demo"                 # 데모 계좌는 테스트넷과 다른 계좌 — 기록도 따로
+        else:
+            suffix = ""
         state = self.cfg.state_path or str(base / f"testnet_auto_state{suffix}.json")
         log = self.cfg.log_path or str(base / f"testnet_auto_log{suffix}.jsonl")
         ks = self.cfg.killswitch_path or str(base / f"testnet_auto_killswitch{suffix}.json")
@@ -206,10 +224,10 @@ class TestnetAuto:
 
     def _ai_extra(self, candles: List[Dict], sig: Dict, ser: Optional[Dict],
                   account: Dict, positions: Sequence[Dict]) -> Dict:
-        """AI 심사에 함께 넣는 '테스트넷 계좌·시장 국면'. 값이 없으면 키를 비워 보내지 않는다."""
+        """AI 심사에 함께 넣는 '샌드박스 계좌·시장 국면'. 값이 없으면 키를 비워 보내지 않는다."""
         extra: Dict = {
             "테스트넷 계좌": {
-                "모드": "mock" if self.mock else "testnet",
+                "모드": self.mode,
                 "잔고USDT": round(float(account.get("equity") or 0.0), 2),
                 "리스크기준USD": account.get("riskBaseUsd"),
                 "열린포지션": len(positions),
@@ -232,12 +250,13 @@ class TestnetAuto:
     # ------------------------------------------------------------------ 상태 파일
     def _blank_state(self) -> Dict:
         return {
-            "version": 1, "mode": "mock" if self.mock else "testnet",
+            "version": 1, "mode": self.mode,
             "symbol": self.cfg.symbol, "interval": int(self.cfg.interval),
             "rule": {"name": "후보1", "kinds": ["M1"], "session": self.cfg.session,
                      "stop_atr": self.cfg.stop_atr, "target_r": self.cfg.target_r,
                      "max_bars": self.cfg.max_bars, "loss_pct": self.cfg.loss_pct,
-                     "leverage": self.cfg.leverage, "testnet_only": True},
+                     "leverage": self.cfg.leverage, "env": self.mode,
+                     "testnet_only": True, "base_url": self.client.base_url},
             "created_at": self.now().isoformat(timespec="seconds"), "updated_at": None,
             "scan_count": 0, "scan_bar": None, "signals_seen": [],
             "position": None, "exchange_position": None, "closed": [],
@@ -261,13 +280,13 @@ class TestnetAuto:
             return state
         state = {**state, **saved}
         if saved.get("mode") and saved["mode"] != state["mode"] and state.get("position"):
-            # mock에서 잡은 가짜 포지션을 실테스트넷 기록으로 착각하지 않는다
+            # mock·테스트넷·데모는 서로 다른 계좌 — 남의 포지션을 내 것으로 착각하지 않는다
             print(f"[testnet-auto] 모드가 다른 상태 파일({saved['mode']} → {state['mode']})입니다 — "
                   "포지션 기록은 무시하고 거래소 상태를 따릅니다", flush=True)
             state["position"] = None
         # 설정이 바뀌어도 포지션·체결 기록은 이어 간다. 규칙 표기만 최신 설정으로 맞춘다.
         state["rule"] = self._blank_state()["rule"]
-        state["mode"] = "mock" if self.mock else "testnet"
+        state["mode"] = self.mode
         state["symbol"] = self.cfg.symbol
         state["interval"] = int(self.cfg.interval)
         self._recompute(state)
@@ -373,8 +392,8 @@ class TestnetAuto:
                    "riskBaseUsd": balance.get("riskBaseUsd"), "mock": bool(balance.get("mock"))}
         self.killswitch.start_day(equity)
         if equity <= 0:
-            return finish("ERROR", ["잔고가 0입니다 — 테스트넷 계정에 모의 USDT를 채운 뒤 다시 실행하세요"],
-                          account=account)
+            return finish("ERROR", [f"잔고가 0입니다 — {ENV_LABELS[self.env]} 계정에 모의 USDT를 채운 뒤 "
+                                   "다시 실행하세요"], account=account)
 
         rows = [p for p in positions if p.get("symbol") == self.cfg.symbol and float(p.get("size") or 0) > 0]
         ex = max(rows, key=lambda p: float(p["size"])) if rows else None
@@ -547,7 +566,7 @@ class TestnetAuto:
         pos = state["position"]
         action = "OPEN"
         events.append(
-            f"테스트넷 {'롱' if side == 'LONG' else '숏'} 진입 {pos['qty']}개 @ {float(pos['entry']):,.2f} · "
+            f"{ENV_LABELS[self.env]} {'롱' if side == 'LONG' else '숏'} 진입 {pos['qty']}개 @ {float(pos['entry']):,.2f} · "
             f"손절 {float(pos['stop']):,.2f} · 목표 {float(pos['target']):,.2f} · "
             f"예상손실 ${pos['risk_usd']:.2f} · 레버리지 {pos['leverage']:g}배 · 주문 {pos['order_id']}")
         return finish(action, events, signal=signal, verdict=verdict, order=order, account=account)
@@ -564,8 +583,9 @@ class TestnetAuto:
         self._recompute(state)
         record = {
             "ts": self.now().isoformat(timespec="seconds"),
-            "mode": "mock" if self.mock else "testnet",
-            "testnet_only": True, "base_url": self.client.base_url,
+            "mode": self.mode,
+            "env": self.env,
+            "testnet_only": True, "sandbox_only": True, "base_url": self.client.base_url,
             "bar": _iso(last["t"]), "bar_kst": _kst(last["t"]),
             "price": last["c"], "bars": bars, "source": source,
             "equity": state.get("equity"),
@@ -630,7 +650,7 @@ class TestnetAuto:
             "leverage": plan.get("leverage"),
             "risk_usd": plan.get("expectedLossUsd"),
             "loss_budget_usd": plan.get("lossBudgetUsd"),
-            "order_id": order.get("orderId"), "mode": "mock" if self.mock else "testnet",
+            "order_id": order.get("orderId"), "mode": self.mode,
             "signal_time": int(sig["time"]), "entry_bar_time": int(entry_bar_time),
             "entry_time": self.now().isoformat(timespec="seconds"), "atr": atr,
             "ai": None if not verdict else {k: verdict.get(k) for k in
@@ -702,12 +722,21 @@ class TestnetAuto:
         return trade
 
     def _record_exchange_close(self, state: Dict, pos: Dict, account: Dict) -> Dict:
-        """거래소에서 이미 닫힌 포지션(TP/SL·수동 청산)을 청산 기록으로 남긴다."""
+        """거래소에서 이미 닫힌 포지션(TP/SL·수동 청산)을 청산 기록으로 남긴다.
+
+        청산 손익 조회는 **부가 조회**다 — 데모 트레이딩 계정에서는 404·미지원(10024 등)으로 막힐 수 있고,
+        응답 모양도 다를 수 있다. 그 실패는 '손익 미확인'으로 남기고 청산 자체(포지션 정리)는 계속한다.
+        """
         rows: List[Dict] = []
+        lookup_error = None
         try:
             rows = self.client.get_closed_pnl(self.cfg.symbol, limit=5)
         except BybitError as exc:
-            print(f"[testnet-auto] 청산 손익 조회 실패: {exc}", flush=True)
+            lookup_error = exc
+            print(f"[testnet-auto] 청산 손익 조회 실패(손익 미확인으로 계속): {exc}", flush=True)
+        except Exception as exc:                       # 미지원 엔드포인트·예상 밖 응답도 루프를 죽이지 않는다
+            lookup_error = exc
+            print(f"[testnet-auto] 청산 손익 조회 실패(손익 미확인으로 계속): {exc!r}", flush=True)
         pick = self._match_closed_pnl(rows, pos)
         pnl = None if pick is None else pick.get("closedPnl")
         exit_price = None if pick is None else pick.get("avgExitPrice")
@@ -719,6 +748,8 @@ class TestnetAuto:
                             int(pick.get("updatedTime") or 0) if pick else None)
         if pick is None:
             trade["note"] = "거래소 청산 기록을 찾지 못했습니다(손익 미확인)"
+            if lookup_error is not None and self.env == "demo":
+                trade["note"] += " — 데모 트레이딩은 청산 손익 조회가 제한될 수 있습니다"
         state["closed"].append(trade)
         state["position"] = None
         if trade["pnl"] is not None:
@@ -762,7 +793,7 @@ class TestnetAuto:
         return {
             "side": pos["side"], "qty": pos["qty"], "entry": pos["entry"], "exit": exit_price,
             "stop": pos["stop"], "target": pos["target"], "risk_usd": pos.get("risk_usd"),
-            "reason": reason, "pnl": pnl, "r": r, "mode": "mock" if self.mock else "testnet",
+            "reason": reason, "pnl": pnl, "r": r, "mode": self.mode,
             "order_id": pos.get("order_id"), "signal_time": pos.get("signal_time"),
             "entry_time": pos.get("entry_time"),
             "exit_time": self.now().isoformat(timespec="seconds"),
@@ -806,8 +837,8 @@ class TestnetAuto:
 
     def status(self) -> Dict:
         state = self.load_state()
-        out = {"ok": True, "mode": "mock" if self.mock else "testnet",
-               "testnet_only": True, "symbol": self.cfg.symbol,
+        out = {"ok": True, "mode": self.mode, "env": self.env,
+               "testnet_only": True, "sandbox_only": True, "symbol": self.cfg.symbol,
                "client": self.client.mode(), "rule": state["rule"],
                "state": state, "killswitch": self.killswitch.status(),
                "settings": self.cfg.to_dict(), "log": self.tail_log()}
@@ -885,11 +916,14 @@ class RunLock:
             self.held = False
 
 
-def build_client(force_mock: bool = False) -> BybitClient:
-    """테스트넷 클라이언트. force_mock이면 키가 있어도 mock(네트워크 주문 없음)."""
+def build_client(force_mock: bool = False, env: Optional[str] = None) -> BybitClient:
+    """샌드박스 클라이언트. force_mock이면 키가 있어도 mock(네트워크 주문 없음).
+
+    env를 주면 그 환경(testnet/demo)으로 고정한다. 안 주면 BYBIT_DEMO·BYBIT_ENV·BYBIT_TESTNET을 따른다.
+    """
     if force_mock:
-        return BybitClient(api_key="", api_secret="")
-    return BybitClient()
+        return BybitClient(api_key="", api_secret="", env=env)
+    return BybitClient(env=env)
 
 
 # ---------------------------------------------------------------------- 출력
@@ -897,6 +931,9 @@ def build_client(force_mock: bool = False) -> BybitClient:
 def print_banner(engine: TestnetAuto) -> None:
     if engine.mock:
         print("[testnet-auto] 모드: mock — 키가 없거나 --mock입니다. 실제 주문은 나가지 않습니다.",
+              flush=True)
+    elif engine.env == "demo":
+        print("[testnet-auto] 모드: 데모 실주문 - api-demo.bybit.com · 모의 USDT만 움직입니다.",
               flush=True)
     else:
         print("[testnet-auto] 모드: 테스트넷 실주문 — api-testnet.bybit.com · 모의 USDT만 움직입니다.",
@@ -925,8 +962,9 @@ def print_record(rec: Dict) -> None:
 def print_status(engine: TestnetAuto) -> None:
     status = engine.status()
     acct = status.get("account") or {}
-    print(f"[testnet-auto] 모드 {status['mode']} · {status['symbol']} · "
-          f"주소 {status['client']['baseUrl']}", flush=True)
+    label = (status.get("client") or {}).get("label")
+    print(f"[testnet-auto] 모드 {status['mode']}" + (f"({label})" if label else "") +
+          f" · {status['symbol']} · 주소 {status['client']['baseUrl']}", flush=True)
     print(f"        진입 {('정지(--resume로 해제)' if engine.paused() else '허용')}", flush=True)
     if status.get("account_error"):
         print(f"        계좌 조회 실패: {status['account_error']}", flush=True)
@@ -964,10 +1002,12 @@ def _candle_file(path: str) -> Dict:
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    ap = argparse.ArgumentParser(description="바이비트 테스트넷 50달러 오토 모드(테스트넷 전용)")
+    ap = argparse.ArgumentParser(description="바이비트 50달러 오토 모드(테스트넷·데모 샌드박스 전용)")
     ap.add_argument("--once", action="store_true", help="한 번만 점검·판단(스케줄러 연동용)")
     ap.add_argument("--loop", action="store_true", help="30분 봉 마감 +90초마다 계속(Ctrl+C 종료)")
     ap.add_argument("--mock", action="store_true", help="키가 있어도 mock으로만 돈다(주문 없음)")
+    ap.add_argument("--demo", action="store_true",
+                    help="바이비트 Demo Trading(api-demo.bybit.com)으로 돈다 — .env에 데모 키를 넣으세요")
     ap.add_argument("--no-ai", action="store_true", help="AI 심사 없이 규칙만")
     ap.add_argument("--symbol", default="BTCUSDT")
     ap.add_argument("--source", default="auto", choices=["auto", "bybit", "okx", "bitget", "binance"])
@@ -1004,7 +1044,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                      state_path=args.state or "", log_path=args.log or "",
                      killswitch_path=args.killswitch or "")
     try:
-        client = build_client(force_mock=args.mock)
+        client = build_client(force_mock=args.mock, env="demo" if args.demo else None)
     except BybitConfigError as exc:
         print(f"[testnet-auto] 설정 오류: {exc}", flush=True)
         return 2

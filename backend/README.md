@@ -20,8 +20,8 @@ backend/
   label_audit.py   차트 라벨 ↔ 엔진 신호 봉 단위 대조
   risk.py          킬스위치 (일일 손실·연속 손절·과매매·급변·수동 정지)
   paper_loop.py    실시간 모의매매 루프 — 지금 장의 M1 후보를 AI가 심사하고 모의 진입·청산·통계를 남긴다(주문 없음)
-  bybit_client.py  바이비트 V5 **테스트넷 전용** 50달러 주문 클라이언트(메인넷·손실률·레버리지 가드, 키 없으면 mock)
-  testnet_auto.py  테스트넷 오토 모드 — paper_loop의 두뇌(후보1+AI)로 bybit_client(테스트넷 주문)를 실제로 움직인다
+  bybit_client.py  바이비트 V5 **테스트넷·데모 전용** 50달러 주문 클라이언트(메인넷·손실률·레버리지 가드, 키 없으면 mock)
+  testnet_auto.py  테스트넷·데모 오토 모드 — paper_loop의 두뇌(후보1+AI)로 bybit_client(샌드박스 주문)를 실제로 움직인다
   test_*.py        단위 테스트 225개 (python3 -m pytest backend -q)
 ```
 
@@ -535,20 +535,27 @@ curl -s -X POST http://127.0.0.1:8765/api/paper/tick   # POST — 1회 스캔(�
   자본 10,000 USDT · 진입 가능(정상). 신호 패스는 커밋된 15분봉 픽스처를 30분봉으로 묶어
   실제 엔진이 세운 M1 자리로 검증했다(진입가 = 다음 봉 시가, 손절 3ATR, 목표 4R, 리스크 1%).
 
-## 6.5 테스트넷 오토 모드 (`testnet_auto.py`)
+## 6.5 테스트넷·데모 오토 모드 (`testnet_auto.py`)
 
-`paper_loop`의 두뇌(후보1 + Gemini 심사)와 `bybit_client`의 손(테스트넷 주문)을 이어, **모의 50 USDT로
-실제 테스트넷 포지션을 여닫는** 실행 엔트리포인트. 집 PC(Windows)에서 더블클릭으로 돌리는 안내는
-저장소 루트의 [`TESTNET_AUTO.md`](../TESTNET_AUTO.md)에 있다.
+`paper_loop`의 두뇌(후보1 + Gemini 심사)와 `bybit_client`의 손(샌드박스 주문)을 이어, **모의 50 USDT로
+실제 포지션을 여닫는** 실행 엔트리포인트. 테스트넷(`api-testnet.bybit.com`)과 Demo Trading
+(`api-demo.bybit.com`) 둘 다 지원하며 어느 쪽도 실돈이 아니다. 집 PC(Windows)에서 더블클릭으로 돌리는
+안내는 저장소 루트의 [`TESTNET_AUTO.md`](../TESTNET_AUTO.md)에 있다.
 
 ```bash
 python -m backend.testnet_auto --once --mock     # 1회 드라이런(키 없이, 주문 없음)
 python -m backend.testnet_auto --once            # 1회 실제 테스트넷 점검
+python -m backend.testnet_auto --once --demo     # 1회 실제 데모 트레이딩 점검
 python -m backend.testnet_auto --loop            # 30분 봉 마감 +90초마다 계속(Ctrl+C 종료)
 python -m backend.testnet_auto --status          # 계좌·포지션·킬스위치·최근 스캔
 python -m backend.testnet_auto --stop / --resume # 신규 진입 정지 / 해제
 python -m backend.testnet_auto --reset           # 로컬 기록 초기화(열린 포지션 있으면 거부)
 ```
+
+- **환경 선택**: `--demo`/`env` 인자 > `BYBIT_DEMO` > `BYBIT_ENV` > `BYBIT_TESTNET` > 기본(테스트넷).
+  `BYBIT_DEMO=true`와 `BYBIT_TESTNET=true`가 둘 다 켜져 있으면 데모가 이기고, 둘 다 끄면 메인넷뿐이라
+  `bybit_client`가 만들 때 `BybitConfigError`로 거부한다. 한국 IP에서 테스트넷 키 발급이 규제(10024)로
+  막힐 때 Demo Trading 키를 쓸 수 있는 경로다.
 
 - **한 스캔**: 확정 30분봉 → 마지막 봉의 M1 후보 → 세션(아시아) → 킬스위치 → 급변 → 현재가 → Gemini
   → 통과 시 다음 봉 시가 기준 **3ATR 손절 · 4R 목표**로 시장가 주문(TP/SL 동봉). 수량·명목가·손실 예산은
@@ -558,6 +565,11 @@ python -m backend.testnet_auto --reset           # 로컬 기록 초기화(열�
   내 기록과 다르면(수동 변경) **닫지 않고** 로그만 남긴다. 96봉이 지나면 시간 청산을 보낸다.
 - **mock**: 거래소가 없으므로 확정 봉의 고가·저가로 손절·목표·96봉 청산을 흉내 낸다. 상태 파일은
   `data/testnet_auto_state.mock.json`으로 분리해, 가짜 포지션이 실테스트넷 진입을 막지 않는다.
+- **환경별 기록**: 데모는 테스트넷과 다른 계좌이므로 `data/testnet_auto_state.demo.json`처럼 `.demo`가
+  붙는다. 같은 폴더에서 두 환경을 번갈아 돌려도 포지션 기록이 섞이지 않는다.
+- **부가 조회 실패는 견딘다**: 데모는 청산 손익(`/v5/position/closed-pnl`) 같은 부가 조회가 제한될 수 있다.
+  그 실패(404·미지원·예상 밖 응답)는 경고를 남기고 '손익 미확인'으로 청산만 기록하며, 잔고·포지션·주문
+  같은 핵심 호출은 그대로 돈다.
 - **모의매매 불가침**: `data/paper_state.json`·`paper_log.jsonl`·`paper_killswitch.json`은 읽지도 쓰지도
   않는다. 경로가 paper 파일을 가리키면 만들 때 `ValueError`.
 - **첫 실측(2026-11-23 09:18 KST, mock)**: 실제 30분봉 2,999개 · 엔진 신호 71건(마지막 봉엔 없음) → HOLD.
@@ -568,7 +580,7 @@ python -m backend.testnet_auto --reset           # 로컬 기록 초기화(열�
 
 - **메인넷(실돈) 주문**: 여전히 만들지 않는다. 실돈이 나가는 일이라 사용자 결정 없이 붙이지 않으며,
   `bybit_client`가 메인넷 주소와 `BYBIT_TESTNET=false`를 만들 때부터 거부한다.
-  테스트넷 검증이 끝난 뒤 사람이 승인할 때 별도로 연다.
+  테스트넷·데모 검증이 끝난 뒤 사람이 승인할 때 별도로 연다.
 - **테스트넷 주문은 붙었다** — `testnet_auto.py`(6.5절). `bybit_client`의 50달러 가드 + `risk.py` 킬스위치
   뒤에 두었고, 잔고·포지션을 읽지 못하면 주문하지 않는다.
 - 24시간 상시 구동(데몬·cron 등록): `--loop`는 터미널이 살아 있는 동안만 돈다. 등록은 사용자가 정한다.
@@ -585,6 +597,7 @@ python3 -m unittest discover -s backend -t . -p "test_*.py"
 전략(22) · 백테스트(12) · 킬스위치(11) · 설정(2) · 오케스트레이터(2) · AI 필터(23) · 배선(8) ·
 모의매매 루프(17) · 교차 검증(4) · MTF(16) · **내 책·복기(9)** · **국면(12)** · **리포트(3)** · **P0 배선(12)** ·
 **테스트넷 오토(38)** = **225개** (2026-11-23).
+**데모 트레이딩 지원(24)** → **249개** (2026-11-23).
 
 모의매매 루프에서 고정한 것(2026-11-19): 진입가가 **다음 봉 시가**이고 손절 3ATR·목표 4R·리스크 1%인지 ·
 진행 중인 봉을 신호로 쓰지 않는지 · 같은 봉·같은 신호로 두 번 진입하지 않는지(AI 호출도 한 번) · AI REJECT가
@@ -599,6 +612,14 @@ python3 -m unittest discover -s backend -t . -p "test_*.py"
 청산 기록으로 확정하고 **진입 이전 옛 기록은 쓰지 않는지** · 내 기록과 다른 포지션은 건드리지 않는지 ·
 잔고 조회 실패 시 주문 없이 ERROR로 멈추는지 · paper 파일을 건드리지 않는지 · 상태·로그에 API 키가
 들어가지 않는지.
+
+데모 트레이딩 지원에서 고정한 것(2026-11-23): `BYBIT_DEMO=true`·`BYBIT_ENV=demo`·`--demo`가
+`api-demo.bybit.com`을 고르는지 · `BYBIT_DEMO`와 `BYBIT_TESTNET`이 둘 다 켜지면 **데모가 이기는지** ·
+`BYBIT_TESTNET=false`가 데모 설정과 함께면 막지 않는지 · 둘 다 끄면 **메인넷뿐이라 거부**하는지 ·
+메인넷·가짜 도메인·http 주소는 데모 모드에서도 거부하는지 · 데모 주문이 같은 서명으로 payload에 실리는지 ·
+데모 상태·로그가 `.demo`로 분리되는지 · 청산 손익이 404·미지원·예상 밖 예외여도 **루프가 죽지 않고**
+청산을 기록하는지 · 배너가 `데모 실주문 - api-demo.bybit.com`을 찍는지 · 샌드박스가 아닌 클라이언트를
+`testnet_auto`가 거부하는지.
 
 새로 고정한 것(2026-11-19): **AI 응답 해석(loss_prob·문턱·별칭·깨진 JSON)** · **문맥이 미래 봉을 읽지 않는지** ·
 **같은 문맥은 캐시로 한 번만 부르는지** · **AI 실패가 통과/거부로 갈리는지** · **REJECT가 13인 판단을 HOLD로 내리는지** ·

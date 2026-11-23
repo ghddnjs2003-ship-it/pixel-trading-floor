@@ -1,10 +1,19 @@
-"""바이비트 V5 **테스트넷 전용** 소액 주문 클라이언트 — 50달러 시드로만 움직이는 안전장치를 코드에 박아 둔 것.
+"""바이비트 V5 **테스트넷·데모 전용** 소액 주문 클라이언트 — 50달러 시드로만 움직이는 안전장치를 코드에 박아 둔 것.
 
-왜 테스트넷만인가
+왜 테스트넷·데모만인가
 - 이 모듈은 실전 자동매매의 '주문을 내는 손'이다. 손이 실수하면 잃는 것은 사용자의 돈이다.
-- 그래서 주소를 https://api-testnet.bybit.com 하나로 고정한다. 다른 주소(특히 api.bybit.com)를
-  넘기면 만들 때부터 BybitConfigError로 거부하고, BYBIT_TESTNET=false도 같은 이유로 거부한다.
+- 그래서 주소를 안전한 두 곳으로만 고정한다.
+    · 테스트넷        https://api-testnet.bybit.com   (BYBIT_TESTNET=true, 기본값)
+    · 데모 트레이딩   https://api-demo.bybit.com      (BYBIT_DEMO=true 또는 BYBIT_ENV=demo)
+  둘 다 실돈이 아닌 모의 USDT만 움직인다. 다른 주소(특히 api.bybit.com)를 넘기면 만들 때부터
+  BybitConfigError로 거부하고, BYBIT_TESTNET=false도 같은 이유로 거부한다.
   실전으로 넘어갈 때는 이 파일을 고치는 것이 아니라, 사람이 별도로 결정하고 승인해야 한다.
+- BYBIT_DEMO=true가 BYBIT_TESTNET=true와 함께 켜져 있으면 **데모가 이긴다**(둘 다 샌드박스이고,
+  데모는 '명시적으로 데모를 고른' 의도이므로). 둘 다 꺼져 있으면 남는 것은 메인넷뿐이므로 거부한다.
+  우선순위: env 인자 > BYBIT_DEMO > BYBIT_ENV > BYBIT_TESTNET > 기본(testnet).
+- 바이비트 Demo Trading은 api-testnet과 base URL만 다르고 V5 REST 경로·HMAC-SHA256 서명이 같다.
+  다만 데모 계정은 /v5/position/closed-pnl 같은 일부 부가 조회가 제한될 수 있어, 그 조회는
+  '손익 미확인'으로 남기고 주문·포지션 관리(핵심 호출)는 계속 돌도록 호출하는 쪽에서 감싼다.
 
 왜 mock 모드가 기본인가
 - BYBIT_API_KEY / BYBIT_API_SECRET이 없으면 네트워크 요청을 한 번도 보내지 않는 mock 모드로 돈다.
@@ -48,6 +57,17 @@ from .config import load_env_file
 
 TESTNET_BASE_URL = "https://api-testnet.bybit.com"
 TESTNET_HOST = "api-testnet.bybit.com"
+DEMO_BASE_URL = "https://api-demo.bybit.com"       # 바이비트 Demo Trading
+DEMO_HOST = "api-demo.bybit.com"
+
+# 허용하는 두 환경 — 이 밖(메인넷 api.bybit.com)은 어떤 경로로도 열지 않는다
+SANDBOX_ENVS = ("testnet", "demo")
+ENV_BASE_URLS = {"testnet": TESTNET_BASE_URL, "demo": DEMO_BASE_URL}
+ENV_HOSTS = {"testnet": TESTNET_HOST, "demo": DEMO_HOST}
+ENV_LABELS = {"testnet": "테스트넷", "demo": "데모 트레이딩"}
+
+_TRUTHY = ("true", "1", "yes", "on", "")
+_FALSY = ("false", "0", "no", "off")
 
 MAX_SEED_USD = 50.0          # 리스크 계산에 쓰는 최대 시드
 DEFAULT_LOSS_PCT = 3.0       # 1회 손실 예산 기본값
@@ -235,15 +255,16 @@ def _truthy_env(raw: str) -> bool:
 
 
 class BybitClient:
-    """테스트넷 V5 클라이언트. 키가 없으면 mock, 있으면 서명 요청(주소는 테스트넷 고정)."""
+    """바이비트 V5 클라이언트(테스트넷·데모 전용). 키가 없으면 mock, 있으면 서명 요청."""
 
     def __init__(self, api_key: Optional[str] = None, api_secret: Optional[str] = None,
                  testnet: Optional[bool] = None, base_url: Optional[str] = None,
                  timeout: float = 10.0, transport: Optional[Transport] = None,
-                 mock_balance: float = 50.0):
+                 mock_balance: float = 50.0, env: Optional[str] = None):
         load_env_file()
-        self.testnet = self._resolve_testnet(testnet)
-        self.base_url = self._resolve_base_url(base_url)
+        env_name, explicit = self._resolve_env(env, testnet)
+        self.env, self.base_url = self._resolve_target(env_name, explicit, base_url)
+        self.testnet = self.env == "testnet"      # 하위 호환: '테스트넷인가'(데모면 False)
 
         key = (api_key if api_key is not None else os.getenv("BYBIT_API_KEY", "")).strip()
         secret = (api_secret if api_secret is not None else os.getenv("BYBIT_API_SECRET", "")).strip()
@@ -270,38 +291,84 @@ class BybitClient:
 
         if self.is_mock:
             self.notes.append("mock 모드 — 키가 없어 실제 네트워크 요청을 보내지 않습니다")
+        else:
+            self.notes.append(f"{ENV_LABELS[self.env]} 실주문 — {self.base_url} · 모의 USDT만 움직입니다")
 
     # -------------------------------------------------------------- 설정 검증
 
-    @staticmethod
-    def _resolve_testnet(explicit: Optional[bool]) -> bool:
-        if explicit is not None:
-            if explicit:
-                return True
+    @property
+    def sandbox(self) -> bool:
+        """메인넷이 아닌 안전한 환경(테스트넷 또는 데모)인가 — 항상 True여야 한다."""
+        return self.env in SANDBOX_ENVS
+
+    @classmethod
+    def _resolve_env(cls, explicit_env: Optional[str],
+                     explicit_testnet: Optional[bool]) -> "tuple[str, bool]":
+        """env 이름과 '인자로 직접 골랐는가'를 정한다(인자로 골랐으면 base_url도 그 환경이어야 한다)."""
+        raw_env = (explicit_env or "").strip().lower()
+        if raw_env:
+            if raw_env not in SANDBOX_ENVS:
+                raise BybitConfigError(
+                    f"env는 testnet 또는 demo만 허용합니다: {explicit_env!r}. "
+                    "실전(메인넷) 거래는 이 모듈에서 거부합니다")
+            return raw_env, True
+        if explicit_testnet is not None:
+            if explicit_testnet:
+                return "testnet", True
             raise BybitConfigError(
                 "testnet=False — 실전(메인넷) 거래는 이 모듈에서 거부합니다. "
-                "테스트넷 검증이 끝나고 사람이 따로 승인할 때까지 테스트넷만 씁니다")
+                "테스트넷 검증이 끝나고 사람이 따로 승인할 때까지 테스트넷만 씁니다. "
+                "바이비트 데모 트레이딩을 쓰려면 env='demo' 또는 BYBIT_DEMO=true")
+
+        demo_raw = os.getenv("BYBIT_DEMO")
+        if demo_raw is not None and demo_raw.strip() != "":
+            value = demo_raw.strip().lower()
+            if value in _TRUTHY:
+                return "demo", False          # 데모가 테스트넷보다 우선
+            if value not in _FALSY:
+                raise BybitConfigError(
+                    f"BYBIT_DEMO 값을 읽을 수 없습니다: {demo_raw!r} (true 또는 false)")
+
+        env_raw = os.getenv("BYBIT_ENV")
+        if env_raw is not None and env_raw.strip() != "":
+            value = env_raw.strip().lower()
+            if value in SANDBOX_ENVS:
+                return value, False
+            raise BybitConfigError(
+                f"BYBIT_ENV 값을 읽을 수 없습니다: {env_raw!r} (testnet 또는 demo; "
+                "실전 mainnet은 이 모듈에서 거부합니다)")
+
         raw = os.getenv("BYBIT_TESTNET", "true")
         value = (raw or "").strip().lower()
-        if value in ("true", "1", "yes", "on", ""):
-            return True
-        if value in ("false", "0", "no", "off"):
+        if value in _TRUTHY:
+            return "testnet", False
+        if value in _FALSY:
             raise BybitConfigError(
                 "BYBIT_TESTNET=false — 실전(메인넷) 거래는 이 모듈에서 거부합니다. "
-                "테스트넷 검증이 끝나고 사람이 따로 승인할 때까지 BYBIT_TESTNET=true로 두세요")
+                "테스트넷 검증이 끝나고 사람이 따로 승인할 때까지 BYBIT_TESTNET=true로 두세요. "
+                "(바이비트 데모 트레이딩을 쓰려면 BYBIT_DEMO=true 또는 BYBIT_ENV=demo)")
         raise BybitConfigError(f"BYBIT_TESTNET 값을 읽을 수 없습니다: {raw!r} (true 또는 false)")
 
-    @staticmethod
-    def _resolve_base_url(base_url: Optional[str]) -> str:
-        url = (base_url or TESTNET_BASE_URL).strip().rstrip("/")
-        host = (urlparse(url).hostname or "").lower()
-        if host != TESTNET_HOST:
-            raise BybitConfigError(
-                f"테스트넷 주소만 허용합니다 — {TESTNET_HOST} 대신 {host or url!r}이 들어왔습니다. "
-                "실전 도메인(api.bybit.com)은 이 모듈에서 거부합니다")
+    @classmethod
+    def _resolve_target(cls, env_name: str, explicit: bool,
+                        base_url: Optional[str]) -> "tuple[str, str]":
+        """환경 이름과 실제 주소를 맞춘다. 샌드박스 두 주소만 허용한다."""
+        if not base_url:
+            return env_name, ENV_BASE_URLS[env_name]
+        url = base_url.strip().rstrip("/")
         if not url.startswith("https://"):
             raise BybitConfigError("Bybit API는 https로만 부릅니다")
-        return url
+        host = (urlparse(url).hostname or "").lower()
+        host_env = next((name for name, h in ENV_HOSTS.items() if h == host), None)
+        if host_env is None:
+            raise BybitConfigError(
+                f"테스트넷·데모 주소만 허용합니다 — {TESTNET_HOST} / {DEMO_HOST} 대신 "
+                f"{host or url!r}이 들어왔습니다. 실전 도메인(api.bybit.com)은 이 모듈에서 거부합니다")
+        if explicit and host_env != env_name:
+            raise BybitConfigError(
+                f"환경({env_name})과 주소({host})가 서로 다릅니다 — 한쪽만 고쳐서 섞이지 않게 합니다. "
+                f"{ENV_BASE_URLS[env_name]} 또는 {ENV_LABELS[host_env]} 설정을 함께 맞추세요")
+        return host_env, url
 
     # -------------------------------------------------------------- 전송
 
@@ -441,6 +508,8 @@ class BybitClient:
 
         주문을 내지 않는다. mock 모드에는 거래소 기록이 없으므로 예외를 낸다 — 모의 청산 손익은
         호출하는 쪽(예: testnet_auto)이 확정 봉으로 계산한다.
+        데모 트레이딩 계정은 이 엔드포인트가 제한될 수 있다(BybitAPIError). 부가 조회이므로
+        호출하는 쪽이 '손익 미확인'으로 감싸고 핵심 루프는 계속 돌아야 한다.
         """
         symbol = symbol.upper()
         if self.is_mock:
@@ -732,12 +801,14 @@ class BybitClient:
     # -------------------------------------------------------------- 안내
 
     def mode(self) -> Dict:
-        return {"mock": self.is_mock, "baseUrl": self.base_url, "testnet": self.testnet,
+        return {"mock": self.is_mock, "baseUrl": self.base_url, "env": self.env,
+                "testnet": self.env == "testnet", "demo": self.env == "demo",
+                "label": ENV_LABELS[self.env], "sandbox": self.sandbox,
                 "recvWindow": self.recv_window, "notes": list(self.notes),
-                "limits": risk_limits()}
+                "limits": risk_limits(self.env)}
 
     def __repr__(self) -> str:
-        return f"BybitClient(mode={'mock' if self.is_mock else 'testnet'}, base={self.base_url})"
+        return f"BybitClient(mode={'mock' if self.is_mock else self.env}, base={self.base_url})"
 
 
 def _f(value) -> float:
@@ -748,16 +819,20 @@ def _f(value) -> float:
         return 0.0
 
 
-def risk_limits() -> Dict:
+def risk_limits(env: str = "testnet") -> Dict:
     """화면·문서에 그대로 보여 줄 수 있는 안전 규칙 요약."""
+    env = env if env in SANDBOX_ENVS else "testnet"
     return {
         "maxSeedUsd": MAX_SEED_USD,
         "lossPctDefault": DEFAULT_LOSS_PCT,
         "lossPctRange": [MIN_LOSS_PCT, MAX_LOSS_PCT],
         "leverageDefault": DEFAULT_LEVERAGE,
         "maxLeverage": MAX_LEVERAGE,
-        "testnetOnly": True,
-        "baseUrl": TESTNET_BASE_URL,
+        "testnetOnly": True,              # 하위 호환: '메인넷 아님'
+        "sandboxOnly": True,              # 샌드박스(테스트넷·데모) 전용
+        "env": env,
+        "baseUrl": ENV_BASE_URLS[env],
+        "envBaseUrls": dict(ENV_BASE_URLS),
         "symbols": sorted(FALLBACK_INSTRUMENTS),
-        "liquidationHint": "테스트넷에서도 청산은 일어난다 — 손절은 주문에 함께 실어 보낸다",
+        "liquidationHint": f"{ENV_LABELS[env]}에서도 청산은 일어난다 — 손절은 주문에 함께 실어 보낸다",
     }

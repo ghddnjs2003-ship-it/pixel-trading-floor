@@ -5,6 +5,7 @@ chcp 65001 >nul
 
 echo ============================================================
 echo  Pixel Trading Floor - TESTNET AUTO MODE - STATUS
+echo  Shows the env picked by backend\.env (testnet or demo).
 echo ============================================================
 echo.
 

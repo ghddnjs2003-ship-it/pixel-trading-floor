@@ -72,15 +72,21 @@
   - 일정표가 이번 주 것이 아니면(자동 갱신이 멈췄으면) 화면에 그 사실을 밝힙니다.
 - 휴대폰(≤900px)에서는 실시간 고래가 먼저, 일정이 아래로 쌓입니다. 탭을 벗어나면 TronGrid·TronScan 호출과 타이머를 모두 멈춥니다.
 
-## 🤖 테스트넷 오토 모드 (2026-11-23)
+## 🤖 테스트넷·데모 오토 모드 (2026-11-23)
 
-30분봉 후보1(M1)이 서고 Gemini가 PASS를 주면 **바이비트 테스트넷**에 모의 50 USDT로 시장가 주문을 냅니다
-(손절 3ATR·목표 4R·레버리지 3배, 주문에 TP/SL 동봉). **실돈은 움직이지 않습니다** — 주소가
-`api-testnet.bybit.com`으로 고정되어 있고 메인넷 주소·`BYBIT_TESTNET=false`는 코드가 거부합니다.
+30분봉 후보1(M1)이 서고 Gemini가 PASS를 주면 **바이비트 테스트넷 또는 Demo Trading**에 모의 50 USDT로
+시장가 주문을 냅니다(손절 3ATR·목표 4R·레버리지 3배, 주문에 TP/SL 동봉). **실돈은 움직이지 않습니다** —
+주소가 `api-testnet.bybit.com`(테스트넷)·`api-demo.bybit.com`(데모) 두 곳으로만 고정되어 있고
+메인넷 주소·`BYBIT_TESTNET=false`는 코드가 거부합니다.
+
+- 한국 IP에서 테스트넷 키 발급이 막혀(10024) 있을 때는 `backend\.env`에 `BYBIT_DEMO=true`(또는
+  `BYBIT_ENV=demo`)를 넣고 Demo Trading 키를 씀니다 — 둘 다 켜져 있으면 데모가 우선합니다.
 
 - 집 PC(Windows)에서 더블클릭으로 돌리는 3개 파일: `run_testnet_auto_mock.bat`(드라이런 1회) ·
   `run_testnet_auto_status.bat`(상태) · `run_testnet_auto.bat`(30분 봉마다 자동)
 - 코드: `backend/testnet_auto.py` · 주문 클라이언트: `backend/bybit_client.py` · 테스트: `backend/test_testnet_auto.py`
+- 데모는 테스트넷과 다른 계좌라 상태·로그도 `*.demo`로 따로 쌓입니다. 데모에서 청산 손익 조회가 제한되면
+  청산은 기록하고 손익만 '미확인'으로 남기며 루프는 계속 돕니다.
 - 모의매매(`paper_loop`, `data/paper_*.json`)와는 **파일부터 분리**되어 있어 서로를 건드리지 않습니다.
 - 단계·한계·오류 대처는 [`TESTNET_AUTO.md`](TESTNET_AUTO.md).
 

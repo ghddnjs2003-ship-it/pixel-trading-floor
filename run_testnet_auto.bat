@@ -4,8 +4,10 @@ cd /d "%~dp0"
 chcp 65001 >nul
 
 echo ============================================================
-echo  Pixel Trading Floor - TESTNET AUTO MODE (Bybit testnet only)
+echo  Pixel Trading Floor - TESTNET/DEMO AUTO MODE (Bybit sandbox only)
 echo  50 USDT seed - 3%% loss per trade - leverage 3x - TP/SL attached
+echo  Sandbox only: api-testnet.bybit.com or api-demo.bybit.com - no real money.
+echo  Demo Trading: put BYBIT_DEMO=true in backend\.env (see TESTNET_AUTO.md).
 echo  Ctrl+C stops the loop. Open positions keep their TP/SL.
 echo ============================================================
 echo.
