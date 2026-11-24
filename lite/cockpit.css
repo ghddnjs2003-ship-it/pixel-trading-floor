@@ -167,6 +167,7 @@
 /* ===== 휴대폰 — 조종석은 [오토] 화면 하나를 다 쓴다 ===== */
 @media (max-width: 820px) {
   .trade-auto { display: none; flex: 1 1 auto; gap: 8px; min-height: 0; padding: 9px 9px 12px; overflow-y: auto; overscroll-behavior-y: contain; }
+  .trade-auto .ta-log { flex: none; }
   #trade-page[data-tview="auto"] .trade-auto { display: flex; }
   #trade-page[data-tview="auto"] .trade-layout,
   #trade-page[data-tview="auto"] #trade-ai-banner { display: none; }
