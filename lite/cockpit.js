@@ -308,7 +308,7 @@
       <div class="ta-log-head"><b>최근 실행 로그</b><span id="ta-log-sub">data/paper_log.jsonl</span></div>
       <ul id="ta-log-list"><li class="ta-empty">로그를 불러오는 중…</li></ul>
     </div>
-    <div class="ta-note">모의 계좌 · 실제 시세 · 실주문 없음 · 긴급 정지는 이 화면을 즉시 멈추고 잠급니다(백엔드 정지는 아래 방법 안내)</div>`;
+    <div class="ta-note">모의 계좌 · 실제 시세 · 실주문 없음 · 긴급 정지는 이 화면을 즉시 멈추고 잠급니다(백엔드 정지는 ⚙️ 설정 안내)</div>`;
 
   const marketbar = page.querySelector('.trade-marketbar');
   if (marketbar) marketbar.after(section);
@@ -398,7 +398,11 @@
       else { posEl.textContent = 'HOLD · 진입 자리 대기'; posEl.className = 'hold'; }
     }
     if (posSub) {
-      if (pos) {
+      if (kill.on) {
+        posSub.innerHTML = kill.front
+          ? '긴급 정지 — 새 스캔·진입을 멈췄습니다 · 잠금을 풀면 다시 따라갑니다'
+          : `백엔드 킬스위치 발동 — ${safe(kill.reason)} · 집 PC에서 해제합니다`;
+      } else if (pos) {
         posSub.innerHTML = `손절 <b>${priceText(pos.stop)}</b> · 목표 <b>${priceText(pos.target)}</b> · 위험 <b>$${num(pos.risk_usd, 2)}</b>`;
       } else if (localOpen.length) {
         const p = localOpen[0];
@@ -632,14 +636,14 @@
     const riskEl = $('#cs-risk');
     const levEl = $('#cs-lev');
     const sesEl = $('#cs-session');
-    if (seedEl && document.activeElement !== seedEl) seedEl.value = String(seed);
-    if (riskEl && document.activeElement !== riskEl) riskEl.value = String(riskPct);
-    if (levEl) levEl.value = String(S.cfg.maxLev);
-    if (sesEl) sesEl.value = S.cfg.session;
-    const line = $('#cs-risk-line');
-    if (line) {
-      line.innerHTML = `실전 기준 <b>시드 $${num(seed)}</b> · 1회 손실 <b>${riskPct}% ($${num(seed * riskPct / 100, 2)})</b> · 최대 <b>${Number(S.cfg.maxLev)}x</b> · <b>${safe(SESSIONS[S.cfg.session])}</b> — 저장하면 조종석 카드에 바로 반영됩니다`;
+    // 사용자가 입력 중인 값은 새로고침·저장 밖에서 덮어쓰지 않는다
+    if (!S.settingsDirty) {
+      if (seedEl) seedEl.value = String(seed);
+      if (riskEl) riskEl.value = String(riskPct);
+      if (levEl) levEl.value = String(S.cfg.maxLev);
+      if (sesEl) sesEl.value = S.cfg.session;
     }
+    paintHint();
 
     const worker = $('#cs-worker');
     if (worker) {
@@ -675,8 +679,31 @@
     }
   }
 
+  // 입력하는 동안 기본값 요약 줄이 바로 바뀐다 (저장 전에도 결과가 보이게)
+  function paintHint() {
+    const line = $('#cs-risk-line');
+    if (!line) return;
+    const seed = Number(($('#cs-seed') || {}).value);
+    const riskPct = Number(($('#cs-risk') || {}).value);
+    const lev = Number(($('#cs-lev') || {}).value) || Number(S.cfg.maxLev);
+    const ses = ($('#cs-session') || {}).value || S.cfg.session;
+    if (!(seed > 0) || !(riskPct > 0)) {
+      line.textContent = '실전 시드와 1회 리스크를 숫자로 입력하세요';
+      return;
+    }
+    line.innerHTML = `실전 기준 <b>시드 $${num(seed)}</b> · 1회 손실 <b>${riskPct}% ($${num(seed * riskPct / 100, 2)})</b> · 최대 <b>${lev}x</b> · <b>${safe(SESSIONS[ses] || '')}</b> — 저장하면 조종석 카드에 바로 반영됩니다`;
+  }
+
+  ['#cs-seed', '#cs-risk', '#cs-lev', '#cs-session'].forEach((sel) => {
+    const el = $(sel);
+    if (!el) return;
+    el.addEventListener('input', () => { S.settingsDirty = true; paintHint(); });
+    el.addEventListener('change', () => { S.settingsDirty = true; paintHint(); });
+  });
+
   function openSettings(focus) {
     document.activeElement && document.activeElement.blur && document.activeElement.blur();
+    S.settingsDirty = false;
     paintSettings();
     modal.classList.remove('hidden');
     const gear = $('#view-settings');
@@ -712,6 +739,7 @@
     S.cfg.maxLev = LEVS.includes(lev) ? lev : S.cfg.maxLev;
     if (SESSIONS[ses]) S.cfg.session = ses;
     saveCfg();
+    S.settingsDirty = false;
     render();
     flashBtn('#cs-save', '저장됨 ✓');
   });
@@ -721,6 +749,7 @@
     S.cfg.maxLev = DEFAULTS.maxLev;
     S.cfg.session = DEFAULTS.session;
     saveCfg();
+    S.settingsDirty = false;
     paintSettings();
     render();
     flashBtn('#cs-reset', '기본값 ✓');
