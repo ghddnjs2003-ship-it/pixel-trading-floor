@@ -381,7 +381,7 @@
     }
     if (balSub) {
       const parts = [];
-      if (eq != null && start != null) parts.push(`시작 ${num(start)} → ${pct(start > 0 ? ((eq - start) / start) * 100 : null)}`);
+      if (eq != null && start != null) parts.push(`시작 ${num(start)} → ${num(eq, 2)}`);
       if (localEq != null) parts.push(`로컬 <b>${num(localEq, 2)}</b>`);
       balSub.innerHTML = parts.length ? parts.join(' · ') : '백엔드 기록을 기다리는 중 — 로컬 모의 계좌로 보입니다';
     }
