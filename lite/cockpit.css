@@ -21,7 +21,7 @@
 .trade-auto.collapsed .ta-grid,
 .trade-auto.collapsed .ta-actions,
 .trade-auto.collapsed .ta-log,
-.trade-auto.collapsed .ta-note { display: none; }
+.trade-auto.collapsed > .ta-note { display: none; }
 .ta-head { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
 .ta-title { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .ta-title b { color: #e6edf7; font-size: 13px; letter-spacing: .2px; white-space: nowrap; }
@@ -111,7 +111,7 @@
   .trade-auto .ta-actions { grid-column: 1; grid-row: 3; }
   .trade-auto .ta-log { grid-column: 2; grid-row: 2 / 4; }
   .trade-auto .ta-log ul { max-height: 118px; }
-  .trade-auto .ta-note { grid-column: 1 / -1; }
+  .trade-auto > .ta-note { grid-column: 1 / -1; }
   .ta-card b { font-size: 15px; }
 }
 
