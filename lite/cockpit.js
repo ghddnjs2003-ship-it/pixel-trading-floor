@@ -42,6 +42,13 @@
     ny: '뉴욕 22:00~07:00 KST',
     all: '24시간 상시',
   };
+  // 설정 상자의 옵션은 좁은 칸에 들어가게 KST를 빼고 적는다(고른 뒤 요약 줄에는 KST까지 나온다)
+  const SESSION_OPTS = {
+    asia: '아시아 09:00~17:00',
+    london: '런던 17:00~01:00',
+    ny: '뉴욕 22:00~07:00',
+    all: '24시간 상시',
+  };
   const LEVS = [1, 2, 3, 5, 10];
   const DEFAULTS = { auto: null, kill: null, seed: 50, riskPct: 3, maxLev: 3, session: 'asia', collapsed: false };
   const ACTION_KO = { HOLD: '관망', OPEN: '진입', CLOSE: '청산', SKIP: '건너뜀', REJECT: '거절' };
@@ -606,7 +613,7 @@
           <label>실전 시드 (USDT)<input id="cs-seed" type="number" min="1" step="1" inputmode="decimal" aria-label="실전 시드"></label>
           <label>1회 리스크 (%)<input id="cs-risk" type="number" min="0.1" max="20" step="0.1" inputmode="decimal" aria-label="1회 리스크"></label>
           <label>최대 레버리지<select id="cs-lev">${LEVS.map((v) => `<option value="${v}">${v}x</option>`).join('')}</select></label>
-          <label>가동 세션<select id="cs-session">${Object.keys(SESSIONS).map((k) => `<option value="${k}">${SESSIONS[k]}</option>`).join('')}</select></label>
+          <label>가동 세션<select id="cs-session">${Object.keys(SESSIONS).map((k) => `<option value="${k}">${SESSION_OPTS[k]}</option>`).join('')}</select></label>
         </div>
         <p class="ta-hint" id="cs-risk-line">—</p>
         <div class="ta-sec-actions"><button id="cs-reset" type="button">기본값</button><button id="cs-save" class="primary" type="button">저장</button></div>
@@ -668,7 +675,7 @@
       const local = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(location.hostname);
       pc.innerHTML = local
         ? '<b class="dim">이 PC에서 열림</b> · 백엔드 상태는 <code>run_testnet_auto_status.bat</code>으로 확인'
-        : '<b class="dim">집 PC 로컬 전용</b> · 웹에서는 이 파일을 읽지 않습니다(저장소에 올리지 않음)';
+        : '<b class="dim">집 PC 로컬 전용</b> · 웹은 이 파일을 읽지 않습니다';
     }
 
     const killBtn = $('#cs-kill');
