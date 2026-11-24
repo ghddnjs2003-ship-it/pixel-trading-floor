@@ -103,15 +103,16 @@
 .ta-log .ta-empty { color: #6f7d90; font-size: 9px; }
 .ta-note { color: #64718a; font-size: 8px; line-height: 1.4; }
 
-/* 넓은 화면 — 카드(왼쪽) + 로그(오른쪽) */
+/* 넓은 화면 — 카드(왼쪽 3열) + 로그(오른쪽) */
 @media (min-width: 1000px) {
-  .trade-auto { display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 7px 12px; }
+  .trade-auto { display: grid; grid-template-columns: minmax(0, 1fr) 318px; gap: 8px 12px; }
   .trade-auto .ta-head { grid-column: 1 / -1; }
-  .trade-auto .ta-grid { grid-column: 1; grid-row: 2; }
+  .trade-auto .ta-grid { grid-column: 1; grid-row: 2; grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .trade-auto .ta-actions { grid-column: 1; grid-row: 3; }
   .trade-auto .ta-log { grid-column: 2; grid-row: 2 / 4; }
-  .trade-auto .ta-log ul { max-height: 104px; }
+  .trade-auto .ta-log ul { max-height: 118px; }
   .trade-auto .ta-note { grid-column: 1 / -1; }
+  .ta-card b { font-size: 15px; }
 }
 
 /* ===== 설정 창 ===== */
