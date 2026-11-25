@@ -101,6 +101,20 @@ TP/SL 동봉 · 메인넷 차단이며 기록은 `data/demo_ai_experiment_*`로�
 - 코드: `backend/demo_ai_experiment.py` · 테스트: `backend/test_demo_ai_experiment.py`
 - 안내: [`DEMO_AI_EXPERIMENT.md`](DEMO_AI_EXPERIMENT.md)
 
+### 데모 전용 리치식 1~4차 물타기(DCA) 실험 모드 (2026-11-25)
+
+리치 트레이딩 컨트롤러(`ctl/g/config.js` @ `b91184e`)의 `dcaRules`·`followRules`를 그대로 옮긴
+**물타기 엔진**입니다. 5분 완성봉 기준으로 1차 13%(레버리지 기본 50배) → 익절은 평단 대비
+증거금 +10% → 2·3·4차는 증거금 -25/-40/-60%에서 RSI14·볼린저(20, 2.5σ) 조건(강제선 -40/-60/-80%)으로
+15%/33%/100% 추가 → 4차 뒤 평단→청산가 90% 지점에 자동 손절. 1차 방향은 Gemini(5분+4시간)가 정하고,
+키가 없으면 기술 필터가 대신합니다. **데모 전용**이고 기록은 `data/demo_dca_*`로만 남습니다.
+
+- 집 PC: `run_demo_dca_experiment.bat` 더블클릭(30초 점검 · 1분 상태 한 줄 · 5분봉 마감마다 1차 판단)
+- 코드: `backend/demo_dca_experiment.py` · 테스트: `backend/test_demo_dca_experiment.py`
+- 안내: [`DEMO_DCA_EXPERIMENT.md`](DEMO_DCA_EXPERIMENT.md) — 원본과 다른 기본값 두 개(4차 100%·추정 청산가 90%)와
+  원본 그대로 맞추는 옵션(`--reserve-lev-pct 0.48 --sl-est-dist-pct 80`)도 적어 두었습니다.
+- 같은 데모 계좌에서 오토 모드·AI 실험과 **동시에 켜지 마세요**(다른 엔진 잠금을 감지해 실행을 거부합니다).
+
 ## 배포
 
 GitHub Pages는 `gh-pages` 브랜치의 내용을 그대로 올립니다. 파일을 고칠 때는 `main`과 `gh-pages` 두 브랜치를 같은 내용으로 맞춰 주세요(`git push origin main:gh-pages`).

@@ -49,3 +49,11 @@ data/demo_ai_experiment_log*.jsonl
 data/demo_ai_experiment_killswitch*.json
 data/demo_ai_experiment*pause*.txt
 data/demo_ai_experiment*.lock
+
+# 데모 전용 리치식 DCA 실험 실행 산출물 — 집 PC 로컬 상태(차수·평단·증거금 미러·로그·킬스위치).
+#   커밋하지 않는다. 다른 PC로 내려가면 그 PC의 실제 데모 계좌와 어긋난다.
+data/demo_dca_state*.json
+data/demo_dca_log*.jsonl
+data/demo_dca_killswitch*.json
+data/demo_dca*pause*.txt
+data/demo_dca*.lock
