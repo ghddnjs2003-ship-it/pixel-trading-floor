@@ -41,3 +41,11 @@ data/testnet_auto_killswitch*.json
 data/ai_cache_testnet*.json
 data/testnet_auto_pause*.txt
 data/testnet_auto*.lock
+
+# 데모 AI 자율 실험 실행 산출물 — 집 PC 로컬 상태(AI 판단 로그·모의 포지션 미러·킬스위치).
+#   커밋하지 않는다. 다른 PC로 내려가면 그 PC의 실제 데모 계좌와 어긋난다.
+data/demo_ai_experiment_state*.json
+data/demo_ai_experiment_log*.jsonl
+data/demo_ai_experiment_killswitch*.json
+data/demo_ai_experiment*pause*.txt
+data/demo_ai_experiment*.lock

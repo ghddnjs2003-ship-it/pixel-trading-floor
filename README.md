@@ -90,6 +90,17 @@
 - 모의매매(`paper_loop`, `data/paper_*.json`)와는 **파일부터 분리**되어 있어 서로를 건드리지 않습니다.
 - 단계·한계·오류 대처는 [`TESTNET_AUTO.md`](TESTNET_AUTO.md).
 
+### 데모 전용 AI 자율 실험 모드 (AI가 스스로 판단)
+
+기존 오토 모드가 '후보1 규칙 + AI 심사'라면, 이 모드는 **기계 규칙 없이 AI가 직접** 15분봉·4시간봉을 읽고
+`LONG`/`SHORT`/`HOLD`와 손절·목표 배수(1.5~3.0)를 정해 데모 계좌에 주문하고, 보유 중에는 AI가
+`HOLD`/`CLOSE`를 판단합니다. 하루 최대 4회 진입 · 일일 손실 10% 킬스위치 · 레버리지 3배 상한 ·
+TP/SL 동봉 · 메인넷 차단이며 기록은 `data/demo_ai_experiment_*`로만 남습니다(paper·testnet_auto 무관).
+
+- 집 PC: `run_demo_ai_experiment.bat` 더블클릭(15분 봉 마감 +60초 판단 · 1분마다 상태 한 줄)
+- 코드: `backend/demo_ai_experiment.py` · 테스트: `backend/test_demo_ai_experiment.py`
+- 안내: [`DEMO_AI_EXPERIMENT.md`](DEMO_AI_EXPERIMENT.md)
+
 ## 배포
 
 GitHub Pages는 `gh-pages` 브랜치의 내용을 그대로 올립니다. 파일을 고칠 때는 `main`과 `gh-pages` 두 브랜치를 같은 내용으로 맞춰 주세요(`git push origin main:gh-pages`).

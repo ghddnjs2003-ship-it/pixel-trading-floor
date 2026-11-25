@@ -22,7 +22,8 @@ backend/
   paper_loop.py    실시간 모의매매 루프 — 지금 장의 M1 후보를 AI가 심사하고 모의 진입·청산·통계를 남긴다(주문 없음)
   bybit_client.py  바이비트 V5 **테스트넷·데모 전용** 50달러 주문 클라이언트(메인넷·손실률·레버리지 가드, 키 없으면 mock)
   testnet_auto.py  테스트넷·데모 오토 모드 — paper_loop의 두뇌(후보1+AI)로 bybit_client(샌드박스 주문)를 실제로 움직인다
-  test_*.py        단위 테스트 225개 (python3 -m pytest backend -q)
+  demo_ai_experiment.py  데모 전용 AI 자율 실험 — 기계 규칙 없이 AI가 15분·4시간봉을 읽고 진입·보유·청산을 직접 판단(샌드박스 전용·기존 기록 무관)
+  test_*.py        단위 테스트 335개 (python3 -m pytest backend -q)
 ```
 
 ## 1. AI 두뇌 — 무료 API 먼저, 로컬 Ollama는 나중에
