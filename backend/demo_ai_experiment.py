@@ -813,7 +813,11 @@ class DemoAIExperiment:
             balance = self.client.get_balance()
             positions = self.client.get_positions(self.cfg.symbol)
         except BybitError as exc:
-            return finish("ERROR", [f"거래소 조회 실패: {exc}"])
+            hint = ""
+            if self.env == "demo" and getattr(exc, "ret_code", None) in (10003, 10004, 33004):
+                hint = (" — Demo Trading(모의투자) 키인지 확인하세요"
+                        "(테스트넷 키는 데모 계좌에서 인증되지 않습니다)")
+            return finish("ERROR", [f"거래소 조회 실패: {exc}{hint}"])
         equity = float(balance.get("equity") or 0.0)
         account = {"equity": equity, "available": balance.get("available"),
                    "riskBaseUsd": balance.get("riskBaseUsd"), "mock": bool(balance.get("mock"))}

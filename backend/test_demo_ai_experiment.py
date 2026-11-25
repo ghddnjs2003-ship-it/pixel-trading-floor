@@ -619,6 +619,7 @@ class ExchangeTruthTests(Base):
         rec = self.tick(engine)
         self.assertEqual(rec["action"], "ERROR")
         self.assertIn("거래소 조회 실패", rec["events"][0])
+        self.assertIn("Demo Trading", rec["events"][0])
         self.assertEqual([c["path"] for c in transport.calls], ["/v5/account/wallet-balance"])
 
     def test_demo_long_order_goes_to_demo_base(self):
