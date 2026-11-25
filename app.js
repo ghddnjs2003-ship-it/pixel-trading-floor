@@ -2121,11 +2121,14 @@ function init() {
     });
   }
 
-  // 컨트롤
+  // 컨트롤 — ◆ 정밀 분석은 '지금 고른 모드'로 돌린다(알고리즘·⚡스캘핑·⚔공격).
+  // ✂️ 2026-11-26 홍원 님 지적: ⚡스캘핑을 고르고 정밀 분석을 누르면 여기서 모드를 알고리즘으로 되돌려
+  //    (setMode('algo')·analyze('algo')) 버튼 표시가 알고리즘으로 돌아가고 스캘핑 분석이 시작되지 않았다.
+  //    모드 선택은 위 토글 버튼이 정하고, 이 버튼은 그 모드로 분석만 시작한다(입력칸 Enter·자동 운영 '1회 분석'과 같은 방식).
   qs('#analyze-btn').addEventListener('click', () => {
-    setMode('algo');
-    applyModeDim('algo');
-    analyze('algo');
+    setMode(currentMode);        // 화면 토글·몸통 클래스를 내부 상태와 맞춘다 — 고른 모드는 바꾸지 않는다
+    applyModeDim(currentMode);
+    analyze(currentMode);
   });
   qs('#symbol-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') analyze(); });
   // ✂️ 모의 진입 버튼 (판정 패널 · 휴대폰 판정 줄) — 눌렀을 때만 포지션이 열린다
