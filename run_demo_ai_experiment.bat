@@ -27,8 +27,8 @@ if errorlevel 1 (
 if not exist "backend\.env" (
   echo [INFO] backend\.env is missing - copying backend\.env.example.
   copy "backend\.env.example" "backend\.env" >nul
-  echo [INFO] Open backend\.env and fill BYBIT_API_KEY / BYBIT_API_SECRET (Demo Trading key),
-  echo        then run this again. Without keys it runs in mock mode (no orders).
+  echo [INFO] Open backend\.env and fill BYBIT_API_KEY / BYBIT_API_SECRET for Demo Trading,
+  echo        then run this again. Without keys it runs in mock mode.
   echo.
   pause
   exit /b 1
