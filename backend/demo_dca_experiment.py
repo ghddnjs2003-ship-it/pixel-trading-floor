@@ -1184,9 +1184,15 @@ class DemoDcaExperiment:
         elif local and not ex:
             action, events = self._position_gone(state, local, bars, price, account, last, now_ms)
         elif ex and not local:
-            action = "SKIP"
-            events.append(f"거래소에 이미 {_side_ko(ex['side'])} {ex['size']} 포지션이 있습니다 — "
-                          "내 기록이 아니므로 건드리지 않습니다(수동 진입·다른 엔진)")
+            adopted, events = self._adopt(state, ex, price, account, last)
+            if adopted:
+                action, events, ai_result, order = self._manage(state, state["position"], ex, bars,
+                                                               bars_4h, price, account, last, now_ms)
+                events = ["내 1차 주문이 뒤늦게 보였습니다 — 포지션을 이어받았습니다"] + events
+            else:
+                action = "SKIP"
+                events.append(f"거래소에 이미 {_side_ko(ex['side'])} {ex['size']} 포지션이 있습니다 — "
+                              "내 기록이 아니므로 건드리지 않습니다(수동 진입·다른 엔진)")
         else:
             action, events, ai_result, order = self._try_entry(state, bars, bars_4h, price,
                                                                account, last, now_ms)
@@ -1264,6 +1270,38 @@ class DemoDcaExperiment:
             action = "SKIP"
             events.append(note)
         return (action, events, None, order)
+
+    def _adopt(self, state: Dict, ex: Dict, price: float, account: Dict, last: Dict):
+        """1차 주문 직후 조회에서 안 보였던 내 포지션을 다음 점검에서 이어받는다(TP 없는 방치 방지)."""
+        cand = state.get("orphan_candidate") or {}
+        if not cand:
+            return False, []
+        bar = int(cand.get("bar") or 0)
+        if int(last["t"]) - bar > 3 * self.tf_ms or str(ex.get("side")) != str(cand.get("side")):
+            state["orphan_candidate"] = None
+            return False, []
+        qty = float(ex.get("size") or 0.0)
+        avg = float(ex.get("entryPrice") or price)
+        lev = float(ex.get("leverage") or self.cfg.leverage)
+        capital = float(cand.get("capital") or 0.0) or (float(account.get("available") or 0.0)
+                                                        + float(account.get("used") or 0.0))
+        state["position"] = {
+            "side": str(ex.get("side")), "dir": _dir_of(str(ex.get("side"))), "stage": 1,
+            "qty": round(qty, 8), "avg": round(avg, 6), "leverage": lev,
+            "margin": round(qty * avg / max(1.0, lev), 4), "capital": round(capital, 4),
+            "available_at_open": _num((account or {}).get("available")),
+            "tp": None, "stop": None, "liq": _num(ex.get("liqPrice")),
+            "entry_bar": bar, "last_fill_bar": bar,
+            "opened_at": cand.get("at") or self.now().isoformat(timespec="seconds"),
+            "fills": [{"stage": 1, "qty": _num(qty, 8), "price": _num(price), "avgAfter": _num(avg),
+                       "margin": None, "at": cand.get("at"), "bar": _iso(bar),
+                       "order_id": cand.get("order_id"), "trigger": "entry_adopted"}],
+            "ai": state.get("ai_last") or {},
+        }
+        state["orphan_candidate"] = None
+        state["day"]["entries"] = int((state.get("day") or {}).get("entries") or 0) + 1
+        notes = self._apply_protection(state["position"], last, price)
+        return True, notes
 
     def _ensure_protection(self, pos: Dict, ex: Dict, last: Dict) -> Optional[str]:
         """한 봉에 한 번 거래소 TP(4차면 SL도)를 새 평단과 맞춘다 — 설정 실패·재시작 뒤에도 자리를 잡는다."""
@@ -1537,9 +1575,22 @@ class DemoDcaExperiment:
             ex = self.client.get_position(self.cfg.symbol)
         except BybitError:
             ex = None
+        if not ex and not self.mock:
+            time.sleep(0.4)                 # 시장가 체결 반영을 한 번 더 기다린다
+            try:
+                ex = self.client.get_position(self.cfg.symbol)
+            except BybitError:
+                ex = None
         if not ex:
-            return "ERROR", [f"1차 주문({(order or {}).get('orderId')})을 보냈지만 포지션이 보이지 않습니다 — "
-                             "다음 스캔에서 다시 확인합니다"], ai_result, order
+            # 주문은 접수되었는데 아직 포지션이 보이지 않는다 — 다음 점검에서 이 주문을 이어받도록 남긴다
+            state["orphan_candidate"] = {
+                "side": side, "qty": float(qty),
+                "bar": int(last["t"]), "at": self.now().isoformat(timespec="seconds"),
+                "order_id": (order or {}).get("orderId"), "capital": round(capital, 4),
+            }
+            return "ERROR", [f"1차 주문({(order or {}).get('orderId')}) 접수 — 체결이 아직 보이지 않아 "
+                             "다음 점검에서 포지션을 확인하고, 있으면 이어받아 TP를 겁니다"], ai_result, order
+        state["orphan_candidate"] = None
         avg = float(ex.get("entryPrice") or price)
         state["position"] = {
             "side": str(ex.get("side") or side), "dir": _dir_of(str(ex.get("side") or side)),

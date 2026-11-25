@@ -368,6 +368,43 @@ class TestEntry(Base):
         self.assertEqual(rec2["action"], "SKIP")
         self.assertIn("킬스위치", rec2["events"][0])
 
+    def test_adopts_own_order_that_appears_one_tick_late(self):
+        class BlindClient(DcaBybitClient):
+            """주문 직후 한 번은 포지션이 안 보이는 거래소(체결 반영 지연)를 흉내 낸다."""
+
+            def __init__(self, *a, **k):
+                super().__init__(*a, **k)
+                self.blind = 0
+
+            def place_dca_order(self, symbol, side, qty, reduce_only=False):
+                result = super().place_dca_order(symbol, side, qty, reduce_only)
+                self.blind = 1
+                return result
+
+            def get_position(self, symbol):
+                if self.blind > 0:
+                    self.blind -= 1
+                    return None
+                return super().get_position(symbol)
+
+        client = BlindClient(api_key="", api_secret="", env="demo")
+        eng = self.engine(client=client)
+        candles = flat(120, 2000.0)
+        first = self.tick(eng, candles)
+        self.assertEqual(first["action"], "ERROR", first["events"])
+        state = eng.load_state()
+        self.assertIsNone(state["position"])
+        self.assertTrue(state.get("orphan_candidate"))
+        # 다음 점검 — 포지션이 보이면 이어받고 익절을 건다
+        second = eng.tick(candles=candles, candles_4h=candles, now_ms=now_after(candles) + 30_000)
+        self.assertIn(second["action"], ("WAIT", "HOLD", "ADD"), second["events"])
+        state = eng.load_state()
+        self.assertIsNotNone(state["position"])
+        self.assertEqual(state["position"]["stage"], 1)
+        self.assertIsNotNone(state["position"]["tp"])
+        self.assertIsNone(state.get("orphan_candidate"))
+        self.assertEqual(state["day"]["entries"], 1)
+
     def test_minimum_order_refusal_has_numbers(self):
         eng = self.engine(self.cfg(symbol="BTCUSDT", first_pct=1.0, force_entry="long"))
         eng.client.set_mock_price("BTCUSDT", 60_000.0)
