@@ -451,6 +451,17 @@ html.m #mv-report-btn { display: inline-block; }
    =========================================================================== */
 html.m, html.m body { min-width: 0; height: 100%; overflow: hidden; font-size: 13px; }
 html.m #app { min-width: 0; height: 100vh; height: 100dvh; min-height: 0; overflow: hidden; }
+/* v28: 휴대폰 '픽셀 오피스' 화면도 위아래로 내릴 수 있게 — html·body의 100%·hidden 고정을 푼다.
+   트레이딩·소개 속 셸(?shell)·녹화 프레임(?frame)·9:16 릴스(?vertical)는 각자 고정 레이아웃을 그대로 쓴다. */
+html.m:not(.trading-view):not(.shell):not(.frame):not(.vertical):not(.dash-view):not(.whale-view):not(.screener-view) {
+  height: auto; min-height: 100%; overflow-x: hidden; overflow-y: auto;
+}
+html.m:not(.trading-view):not(.shell):not(.frame):not(.vertical):not(.dash-view):not(.whale-view):not(.screener-view) body {
+  height: auto; min-height: 100%; overflow-x: hidden; overflow-y: visible;
+}
+html.m:not(.trading-view):not(.shell):not(.frame):not(.vertical):not(.dash-view):not(.whale-view):not(.screener-view) #app {
+  height: auto; min-height: 100vh; min-height: 100dvh; overflow: visible;
+}
 html.m .crt { opacity: .035; }
 
 /* 상단: 로고 + AUTO 칩 한 줄, 조작은 한 줄로 접는다 */

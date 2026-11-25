@@ -1043,10 +1043,16 @@ body.mode-algo #room-scalp .desk::after { width: 70px; }
 #dp-verdict-badge.reject  { background: #33120f; color: var(--red); }
 #dp-sizing { color: #b9b9cc; }
 
-/* --- 레이아웃 높이 고정: 콘솔 로그가 늘어나도 페이지가 커지지 않게 --- */
-html, body { height: 100%; }
-#app { height: 100vh; min-height: 100vh; overflow: hidden; }
-#stage { min-height: 0; overflow: hidden; }
+/* --- 레이아웃 높이 (v28) ---
+   예전에는 문서 높이를 100vh로 못박고 overflow:hidden으로 잘라서, 창이 조금만 작아도
+   아래(포지션 패널·콘솔 바닥·급변동 알림)가 잘린 채 마우스로 내릴 수 없었다.
+   이제는 내용이 화면보다 길면 문서 전체가 그대로 위아래로 스크롤된다.
+   픽셀 오피스 바닥(#floor)·트레이딩뷰 차트는 각자 높이를 그대로 지킨다. */
+html, body { height: auto; min-height: 100%; }
+html { overflow-x: hidden; overflow-y: auto; }
+body { overflow-y: auto; }
+#app { height: auto; min-height: 100vh; overflow: visible; }
+#stage { min-height: 480px; overflow: visible; }
 #floor { min-height: 0; }
 #room-analyst, #room-scalp, #room-research, #room-trading { min-height: 0; }
 #console { min-height: 0; }
