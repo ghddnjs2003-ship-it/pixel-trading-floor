@@ -24,7 +24,7 @@ from backend.ai_filter import FilterConfig
 from backend.bybit_client import DEMO_BASE_URL, TESTNET_BASE_URL, BybitClient, BybitConfigError
 from backend.testnet_auto import (AutoConfig, RunLock, TestnetAuto, build_client, format_live_line,
                                   main, nearest_level, next_bar_close_ms, next_scan_ms, print_banner,
-                                  run_live_loop, swing_levels, volatility_spike)
+                                  run_live_loop, run_smoke_test, swing_levels, volatility_spike)
 
 TF = 1_800_000                     # 30분
 START = 1_790_000_000_000          # 2026-09-19 14:00 UTC → 진입 봉은 02:00 UTC(아시아 세션)
@@ -1088,6 +1088,194 @@ class LiveTickerTests(TestnetAutoTestBase):
         os.environ["BYBIT_ADAPTIVE"] = "true"
         self.assertTrue(run("env", []))
         self.assertFalse(run("env_off", ["--no-adaptive"]))
+
+
+class SequenceTransport:
+    """경로별로 응답을 **순서대로** 돌려주는 가짜 전송 — 주문 전/후 포지션 목록이 달라야 하는 흐름용.
+
+    큐에 하나만 남으면 그 응답을 계속 돌려준다(청산 뒤 재확인처럼 같은 '빈 목록'이 반복되는 경우).
+    """
+
+    def __init__(self, responses):
+        self.queues = {path: list(items) for path, items in responses.items()}
+        self.calls = []
+
+    def __call__(self, method, path, params, body, headers):
+        self.calls.append({"method": method, "path": path, "params": dict(params),
+                           "body": body, "headers": dict(headers)})
+        queue = self.queues.get(path)
+        if not queue:
+            raise AssertionError(f"예상하지 못한 요청: {method} {path}")
+        item = queue.pop(0) if len(queue) > 1 else queue[0]
+        return json.loads(json.dumps(item))
+
+
+SMOKE_POSITION = {"retCode": 0, "result": {"list": [{
+    "symbol": "BTCUSDT", "side": "Buy", "size": "0.002", "avgPrice": "60000",
+    "stopLoss": "59400", "takeProfit": "61200", "leverage": "3",
+    "unrealisedPnl": "0.4", "updatedTime": "1790220000000"}]}}
+SMOKE_CLOSED_PNL = {"retCode": 0, "result": {"list": [{
+    "symbol": "BTCUSDT", "side": "Buy", "qty": "0.002", "avgEntryPrice": "60000",
+    "avgExitPrice": "59990", "closedPnl": "-0.02", "updatedTime": "1790220003000"}]}}
+INSTRUMENTS = {"retCode": 0, "result": {"list": [{
+    "symbol": "BTCUSDT",
+    "lotSizeFilter": {"minOrderQty": "0.001", "qtyStep": "0.001", "maxOrderQty": "100"},
+    "priceFilter": {"tickSize": "0.10"}}]}}
+
+
+def smoke_responses(**over):
+    """시험 주문 성공 흐름의 응답 — 인자로 한 경로씩 바꿔 끼울 수 있다."""
+    responses = {
+        "/v5/account/wallet-balance": [BALANCE_50],
+        "/v5/position/list": [NO_POSITIONS, SMOKE_POSITION, SMOKE_POSITION, NO_POSITIONS],
+        "/v5/market/tickers": [{"retCode": 0, "result": {"list": [{"lastPrice": "60000"}]}}],
+        "/v5/market/instruments-info": [INSTRUMENTS],
+        "/v5/position/set-leverage": [{"retCode": 0, "result": {}}],
+        "/v5/order/create": [{"retCode": 0, "result": {"orderId": "smoke-entry"}},
+                             {"retCode": 0, "result": {"orderId": "smoke-close"}}],
+        "/v5/position/closed-pnl": [SMOKE_CLOSED_PNL],
+    }
+    responses.update(over)
+    return responses
+
+
+class SmokeTestTests(TestnetAutoTestBase):
+    """--smoke-test — 샌드박스 1회 주문 → 3초 뒤 포지션 확인 → 즉시 청산.
+
+    실제로 기다리지 않는다(sleep 주입). 확인하는 것
+    1) 주문 1회(TP/SL 동봉) → 포지션 확인 → 청산 1회 → 잔여 0건 흐름
+    2) 키가 없거나(mock) 이미 열린 포지션이 있으면 주문하지 않는다
+    3) 데모의 closed-pnl 미지원이 시험을 죽이지 않는다
+    4) 모의매매·오토 모드 상태 파일은 읽지도 쓰지도 않는다
+    """
+
+    def live(self, responses, env=None):
+        transport = SequenceTransport(responses)
+        client = BybitClient(api_key="k", api_secret="s", env=env, transport=transport)
+        return client, transport
+
+    def demo_engine(self, responses=None, **cfg):
+        client, transport = self.live(smoke_responses(**(responses or {})), env="demo")
+        engine = TestnetAuto(AutoConfig(data_dir=self.dir, **cfg), client=client, ai=False)
+        return engine, transport
+
+    def run_smoke(self, engine):
+        lines = []
+        result = run_smoke_test(engine, sleep=lambda _sec: None, out=lines.append)
+        return result, lines
+
+    def test_full_flow_orders_checks_and_closes(self):
+        engine, transport = self.demo_engine()
+        result, lines = self.run_smoke(engine)
+        self.assertTrue(result["ok"], "\n".join(lines))
+        bodies = [c["body"] for c in transport.calls if c["path"] == "/v5/order/create"]
+        self.assertEqual(len(bodies), 2)                        # 진입 1회 + 청산 1회
+        entry, close = bodies
+        self.assertEqual(entry["side"], "Buy")
+        self.assertEqual(entry["orderType"], "Market")
+        self.assertEqual(entry["stopLoss"], "59400")           # 현재가 -1%
+        self.assertEqual(entry["takeProfit"], "61200")         # 현재가 +2%
+        self.assertEqual(entry["tpslMode"], "Full")
+        self.assertEqual(entry["qty"], "0.002")                # 50달러·3%·3배 규칙
+        self.assertEqual(close["side"], "Sell")
+        self.assertTrue(close["reduceOnly"])
+        self.assertEqual(close["qty"], "0.002")
+        text = "\n".join(lines)
+        self.assertIn("포지션 확인", text)
+        self.assertIn("미실현손익", text)
+        self.assertIn("잔여 포지션 0건", text)
+        self.assertIn("실제 돈은 나가지 않았습니다", text)
+        self.assertIsNotNone(result["closed_pnl"])
+        self.assertNotIn("미지원", text)
+
+    def test_state_and_paper_files_are_not_touched(self):
+        engine, transport = self.demo_engine()
+        state_path = Path(engine.state_path)
+        paper = Path(self.dir) / "paper_state.json"
+        sentinel = '{"scan_count": 7, "closed": [{"pnl": 1.0}], "signals_seen": ["x"]}'
+        state_path.write_text(sentinel, encoding="utf-8")
+        paper.write_text(sentinel, encoding="utf-8")
+        result, _lines = self.run_smoke(engine)
+        self.assertTrue(result["ok"])
+        self.assertEqual(state_path.read_text(encoding="utf-8"), sentinel)
+        self.assertEqual(paper.read_text(encoding="utf-8"), sentinel)
+        self.assertFalse((Path(self.dir) / "testnet_auto_log.demo.jsonl").exists())
+
+    def test_existing_position_is_refused_without_ordering(self):
+        engine, transport = self.demo_engine({
+            "/v5/position/list": [{"retCode": 0, "result": {"list": [{
+                "symbol": "BTCUSDT", "side": "Buy", "size": "0.003", "avgPrice": "60000",
+                "stopLoss": "", "takeProfit": "", "leverage": "3"}]}}],
+            "/v5/order/create": [{"retCode": 0, "result": {"orderId": "never"}}],
+        })
+        result, lines = self.run_smoke(engine)
+        self.assertFalse(result["ok"])
+        self.assertIn("열린 포지션이 있어 시험 주문을 건너뜁니다", result["refused"])
+        self.assertNotIn("/v5/order/create", [c["path"] for c in transport.calls])
+        self.assertNotIn("/v5/account/wallet-balance", [c["path"] for c in transport.calls])
+
+    def test_missing_keys_refuse_before_any_request(self):
+        engine = self.engine(ai=False)                          # 키 없음 → mock
+        self.assertTrue(engine.mock)
+        result, lines = self.run_smoke(engine)
+        self.assertFalse(result["ok"])
+        self.assertIn("BYBIT_API_KEY/SECRET이 필요합니다(샌드박스 전용)", "\n".join(lines))
+
+    def test_demo_closed_pnl_unsupported_does_not_break_the_test(self):
+        engine, transport = self.demo_engine({
+            "/v5/position/closed-pnl": [{"retCode": 404, "retMsg": "Not Found"}]})
+        result, lines = self.run_smoke(engine)
+        self.assertTrue(result["ok"])
+        self.assertIn("데모 계정 정책상 closed-pnl 미지원", "\n".join(lines))
+        self.assertIn("데모 계정 정책상 closed-pnl 미지원", result["pnl_note"])
+
+    def test_order_rejected_by_the_50_dollar_rule_is_reported(self):
+        engine, transport = self.demo_engine({
+            "/v5/account/wallet-balance": [{"retCode": 0, "result": {"list": [{
+                "totalEquity": "1", "coin": [{"coin": "USDT", "equity": "1",
+                                                "walletBalance": "1",
+                                                "availableToWithdraw": "1"}]}]}}]})
+        result, lines = self.run_smoke(engine)
+        self.assertFalse(result["ok"])
+        self.assertIn("주문 거부", result["refused"])
+        self.assertIn("최소 주문 수량", result["refused"])
+        self.assertNotIn("/v5/order/create", [c["path"] for c in transport.calls])
+
+    def test_uncertain_order_error_is_not_repeated(self):
+        engine, transport = self.demo_engine({
+            "/v5/order/create": [{"retCode": 10016, "retMsg": "server error"},
+                                 {"retCode": 0, "result": {"orderId": "smoke-close"}}]})
+        result, lines = self.run_smoke(engine)
+        self.assertFalse(result["ok"])
+        self.assertIn("다시 보내지 않고", "\n".join(lines))
+        creates = [c["body"] for c in transport.calls if c["path"] == "/v5/order/create"]
+        self.assertEqual([b["side"] for b in creates].count("Buy"), 1)   # 진입 주문은 한 번만
+        if len(creates) > 1:                                    # 오류 뒤 포지션이 보이면 정리 청산
+            self.assertTrue(creates[1]["reduceOnly"])
+
+    def test_cli_refuses_in_mock_mode(self):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            code = main(["--smoke-test", "--mock", "--demo", "--quiet",
+                         "--state", os.path.join(self.dir, "smoke_state.json"),
+                         "--log", os.path.join(self.dir, "smoke_log.jsonl"),
+                         "--killswitch", os.path.join(self.dir, "smoke_ks.json")])
+        self.assertEqual(code, 1)
+        self.assertIn("BYBIT_API_KEY/SECRET이 필요합니다", buf.getvalue())
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "smoke_state.json")))
+
+    def test_cli_refuses_while_a_loop_holds_the_lock(self):
+        state = os.path.join(self.dir, "locked_state.json")
+        os.environ["BYBIT_API_KEY"] = "k"
+        os.environ["BYBIT_API_SECRET"] = "s"
+        Path(state + ".lock").write_text("1234 running\n", encoding="utf-8")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            code = main(["--smoke-test", "--demo", "--quiet", "--state", state,
+                         "--log", os.path.join(self.dir, "locked_log.jsonl"),
+                         "--killswitch", os.path.join(self.dir, "locked_ks.json")])
+        self.assertEqual(code, 1)
+        self.assertIn("이미 실행 중인 것 같습니다", buf.getvalue())
 
 
 if __name__ == "__main__":

@@ -35,6 +35,9 @@
   시작할 때 `*.lock`을 잡아 두 번째를 멈춘다(2시간 지난 잠금은 꺼진 프로세스의 흔적으로 보고 넘어간다).
 - **결과 불확실은 재시도하지 않는다**: 주문 전송이 오류로 끝나면 같은 스캔에서 다시 보내지 않고,
   다음 스캔에서 거래소 포지션을 보고 판단한다(중복 주문 방지).
+- **시험 주문은 기록을 오염시키지 않는다**: `--smoke-test`는 상태·로그·킬스위치·pause 파일은 물론
+  `paper_*`도 읽지도 쓰지도 않는다. 잠금만 빌려 돌고 있는 루프와 겹치지 않게 하고, 비정상 종료 뒤에도
+  내 기록과 거래소가 어긋나지 않는다.
 
 실행
     python -m backend.testnet_auto --once                 # 1회 점검·판단(키 없으면 mock)
@@ -45,8 +48,10 @@
     python -m backend.testnet_auto --loop --no-adaptive   # 상황 맞춤 감시 끔(30분 고정)
     python -m backend.testnet_auto --status               # 계좌·포지션·킬스위치·최근 기록
     python -m backend.testnet_auto --stop / --resume      # 신규 진입 정지 / 해제(돌고 있는 루프에도 먹힘)
+    python -m backend.testnet_auto --smoke-test --demo    # 샌드박스 1회 시험 주문 → 3초 뒤 확인 → 즉시 청산
     python -m backend.testnet_auto --once --candles data/btc_15m_3600.json   # 오프라인 재생(주문 없음)
     run_testnet_auto.bat                                  # Windows: 위 --loop을 더블클릭으로
+    run_testnet_smoke_test.bat                            # Windows: 위 --smoke-test를 더블클릭으로
 
 환경 선택(BYBIT_DEMO / BYBIT_TESTNET / --demo)은 `bybit_client`가 정한다.
 """
@@ -88,6 +93,13 @@ DEFAULT_ATR_LOOKBACK = 20   # 평균 ATR을 낼 최근 봉 수
 DEFAULT_LEVEL_PCT = 0.35    # BSL/SSL '근접' 폭(%) — 현재가가 이 안쪽이면 집중 감시
 DEFAULT_SWING_LOOKBACK = 20 # BSL/SSL을 잡을 직전 봉 수
 RETRY_SEC = 120             # 스캔이 예외로 끝났을 때 다시 보기까지(전체 주기를 기다리지 않는다)
+
+# 시험 주문(--smoke-test) — 신호를 기다리지 않고 주문·포지션·청산 파이프라인만 눈으로 확인한다
+SMOKE_STOP_PCT = 1.0        # 롱 시험 주문 손절 — 현재가 -1%
+SMOKE_TARGET_PCT = 2.0      # 목표 — 현재가 +2%(손절 거리의 2배)
+SMOKE_WAIT_SEC = 3.0        # 주문 뒤 포지션을 확인하기까지 기다리는 시간(초)
+SMOKE_POLL_ATTEMPTS = 5     # 포지션 등장·소멸을 다시 확인하는 횟수(거래소 반영 지연 여유)
+SMOKE_POLL_SEC = 2.0        # 그 재확인 간격(초)
 
 # 이 모듈이 절대 건드리면 안 되는 파일 이름 — 서버 30분 모의매매가 쓰는 것들
 PAPER_NAMES = ("paper_state.json", "paper_log.jsonl", "paper_killswitch.json",
@@ -1173,6 +1185,204 @@ def build_client(force_mock: bool = False, env: Optional[str] = None) -> BybitCl
     return BybitClient(env=env)
 
 
+# ---------------------------------------------------------------------- 시험 주문(1회)
+
+def run_smoke_test(engine: TestnetAuto, *, wait_sec: float = SMOKE_WAIT_SEC,
+                   sleep=time.sleep, poll_attempts: int = SMOKE_POLL_ATTEMPTS,
+                   poll_sec: float = SMOKE_POLL_SEC, out=None) -> Dict:
+    """샌드박스에서 1회 시장가 주문 → wait_sec 뒤 포지션 확인 → 즉시 청산.
+
+    신호(M1)를 기다리지 않고 '주문·TP/SL·포지션·청산' 파이프라인이 살아 있는지만 눈으로 본다.
+    수량·손절·목표·예상손실은 `bybit_client`의 50달러 규칙이 정한다(이 함수는 1%/−1% 거리를 정해 줄 뿐).
+
+    기록 파일은 **하나도 건드리지 않는다** — 상태·로그·킬스위치·pause·paper_* 어느 것도 읽거나 쓰지 않는다.
+    그래서 이 주문은 모의매매(`paper_state.json`)와 오토 모드 통계(`testnet_auto_state.*.json`)를
+    통계·신호 이력 모두 그대로 둔다. (잠금은 CLI에서 루프와 겹치지 않게 따로 잡는다.)
+
+    안전장치: 키가 없거나 mock이면 주문하지 않고 안내한다. 이미 열린 포지션이 있으면(수동 진입 포함)
+    건드리지 않고 건너뛴다. 주문 전송이 오류로 끝나면 같은 주문을 다시 보내지 않고 포지션을 확인해 정리한다.
+    """
+    out = out or (lambda line: print(line, flush=True))
+    events: List[str] = []
+
+    def say(line: str) -> None:
+        events.append(line)
+        out(f"[smoke-test] {line}")
+
+    def refuse(line: str) -> Dict:
+        say(line)
+        return {"ok": False, "refused": line, "order": None, "position": None,
+                "close": None, "remaining": None, "closed_pnl": None, "pnl_note": None,
+                "order_error": None, "events": events}
+
+    client = engine.client
+    cfg = engine.cfg
+    symbol = str(cfg.symbol).upper()
+
+    if bool(getattr(client, "is_mock", False)) or engine.mock:
+        return refuse("BYBIT_API_KEY/SECRET이 필요합니다(샌드박스 전용) — 키가 없으면 mock 모드라 "
+                      "시험 주문을 낼 수 없습니다. backend\\.env에 데모(또는 테스트넷) 키를 넣고 다시 실행하세요")
+    if getattr(client, "env", None) not in SANDBOX_ENVS:
+        return refuse("샌드박스(테스트넷·데모)에서만 시험 주문을 냅니다 — 메인넷 주소로는 실행하지 않습니다")
+
+    say(f"{ENV_LABELS[engine.env]} 샌드박스({client.base_url}) · {symbol} 시장가 1회(롱)")
+    say(f"주문 → {wait_sec:g}초 뒤 포지션 확인 → 즉시 청산 · 실제 돈은 나가지 않습니다 · "
+        "모의매매·오토 모드 기록 파일은 건드리지 않습니다")
+
+    # 1) 거래소 상태 — 이미 열린 포지션(수동 진입 포함)이 있으면 손대지 않는다
+    try:
+        before = client.get_positions(symbol)
+    except BybitError as exc:
+        return refuse(f"거래소 포지션을 확인하지 못해 시험 주문을 하지 않습니다: {exc}")
+    opened = [p for p in before if float(p.get("size") or 0) > 0]
+    if opened:
+        row = opened[0]
+        return refuse(f"열린 포지션이 있어 시험 주문을 건너뜁니다 — {row.get('symbol')} "
+                      f"{row.get('side')} {row.get('size')}개(진입 {float(row.get('entryPrice') or 0):,.2f}). "
+                      "먼저 청산하거나 오토 모드 루프를 멈춘 뒤 다시 실행하세요")
+
+    # 2) 잔고·현재가 — 현재가 기준 −1% 손절 / +2% 목표
+    try:
+        balance = client.get_balance()
+        price = float(client.get_last_price(symbol))
+    except BybitError as exc:
+        return refuse(f"잔고·현재가를 확인하지 못해 시험 주문을 하지 않습니다: {exc}")
+    equity = float(balance.get("equity") or 0.0)
+    if equity <= 0:
+        return refuse(f"잔고가 0입니다 — {ENV_LABELS[engine.env]} 계정에 모의 USDT를 채운 뒤 다시 실행하세요")
+    if price <= 0:
+        return refuse(f"{symbol} 현재가를 읽지 못해 시험 주문을 하지 않습니다")
+    stop = price * (1 - SMOKE_STOP_PCT / 100.0)
+    target = price * (1 + SMOKE_TARGET_PCT / 100.0)
+    say(f"계좌 {equity:,.2f} USDT · 현재가 {price:,.2f} · 손절 {stop:,.2f}(−{SMOKE_STOP_PCT:g}%) · "
+        f"목표 {target:,.2f}(+{SMOKE_TARGET_PCT:g}%)")
+
+    # 3) 주문 — 예산·수량·레버리지는 bybit_client의 50달러 규칙 그대로
+    order = None
+    order_error: Optional[str] = None
+    try:
+        order = client.place_market_order(symbol, "Buy", stop_loss=stop, take_profit=target,
+                                          entry_price=price, loss_pct=cfg.loss_pct,
+                                          leverage=cfg.leverage, balance=equity)
+    except OrderRejected as exc:
+        return refuse(f"주문 거부: {exc}")
+    except (ValueError, BybitConfigError) as exc:
+        return refuse(f"주문 규칙 위반: {exc}")
+    except BybitAPIError as exc:
+        order_error = str(exc)
+        say(f"주문 전송 오류({exc}) — 같은 주문을 다시 보내지 않고 포지션을 확인해 정리합니다")
+
+    if order is not None:
+        plan = order.get("plan") or {}
+        say(f"주문 접수(주문 {order.get('orderId')}) · 수량 {plan.get('qty')}개 · "
+            f"예상손실 ${float(plan.get('expectedLossUsd') or 0):,.2f} / "
+            f"손실예산 ${float(plan.get('lossBudgetUsd') or 0):,.2f} · "
+            f"레버리지 {float(plan.get('leverage') or 0):g}배 · "
+            f"명목 ${float(plan.get('notionalUsd') or 0):,.2f}")
+
+    # 4) wait_sec 뒤 거래소 포지션 — 주문이 실제로 포지션으로 섰는지
+    say(f"{wait_sec:g}초 기다린 뒤 거래소 포지션을 확인합니다")
+    sleep(wait_sec)
+
+    position = None
+    positions: Optional[List[Dict]] = None
+    lookup_failed = False
+    for attempt in range(max(1, int(poll_attempts))):
+        try:
+            positions = [p for p in client.get_positions(symbol) if float(p.get("size") or 0) > 0]
+        except BybitError as exc:
+            say(f"포지션 조회 실패: {exc}")
+            positions = None
+            lookup_failed = True
+            break
+        if positions or attempt == max(1, int(poll_attempts)) - 1:
+            break
+        sleep(poll_sec)                       # 거래소 반영 지연 — 조금 더 기다려 본다
+
+    if positions:
+        position = max(positions, key=lambda p: float(p.get("size") or 0))
+        say(f"포지션 확인 — {position.get('side')} {position.get('size')}개 · "
+            f"진입 {float(position.get('entryPrice') or 0):,.2f} · "
+            f"미실현손익 {float(position.get('unrealisedPnl') or 0):+,.2f} USDT · "
+            f"손절 {float(position.get('stopLoss') or 0):,.2f} · 목표 {float(position.get('takeProfit') or 0):,.2f}")
+    elif order_error:
+        say("주문 오류 뒤 포지션이 보이지 않습니다 — 이번 시험 주문은 체결되지 않은 것으로 보입니다")
+    else:
+        say("주문은 접수됐지만 포지션이 아직 보이지 않습니다 — 청산할 것이 없어 이대로 마칩니다")
+
+    # 5) 즉시 청산 → 잔여 0건 확인
+    #    주문은 나갔는데 포지션 조회가 실패했다면, 내 주문이 열렸을 수 있으므로 청산을 시도한다
+    #    (close_position이 포지션을 스스로 다시 읽는다 — 없으면 '청산할 포지션이 없습니다'로 끝난다).
+    close = None
+    remaining: Optional[List[Dict]] = None
+    need_close = position is not None or (lookup_failed and order is not None)
+    if need_close and position is None:
+        say("포지션을 읽지 못했지만 주문이 나갔으므로 청산을 시도합니다(남긴 채 두지 않습니다)")
+    if need_close:
+        try:
+            close = client.close_position(symbol)
+            say(f"청산 주문 전송(주문 {close.get('orderId')})")
+        except OrderRejected as exc:
+            say(f"청산 주문: {exc} — 이미 닫힌 것으로 보고 잔여 포지션을 확인합니다")
+        except BybitError as exc:
+            say(f"청산 주문 실패({exc}) — 한 번 더 시도합니다")
+            try:
+                close = client.close_position(symbol)
+                say(f"청산 주문 전송(주문 {close.get('orderId')})")
+            except BybitError as again:
+                say(f"청산 재시도도 실패: {again} — 거래소(데모) 화면에서 직접 청산하세요")
+
+        for attempt in range(max(1, int(poll_attempts))):
+            try:
+                remaining = [p for p in client.get_positions(symbol) if float(p.get("size") or 0) > 0]
+            except BybitError as exc:
+                say(f"잔여 포지션 조회 실패: {exc} — 거래소 화면에서 직접 확인하세요")
+                remaining = None
+                break
+            if not remaining:
+                break
+            sleep(poll_sec)
+        if remaining:
+            row = remaining[0]
+            say(f"청산 뒤에도 포지션이 남아 있습니다 — {row.get('side')} {row.get('size')}개. "
+                "거래소(데모) 화면에서 직접 청산하세요(모의 USDT라 손실은 없습니다)")
+        else:
+            say("잔여 포지션 0건 확인 — 주문·포지션·청산까지 정상입니다")
+
+    # 6) 거래소 청산 기록 — 데모는 이 조회가 제한될 수 있어 예외로 죽지 않는다
+    pnl_row = None
+    pnl_note: Optional[str] = None
+    try:
+        rows = client.get_closed_pnl(symbol, limit=1)
+        pnl_row = rows[0] if rows else None
+        if pnl_row:
+            say(f"거래소 청산 기록 — {pnl_row.get('side')} {pnl_row.get('qty')}개 · "
+                f"진입 {float(pnl_row.get('avgEntryPrice') or 0):,.2f} → 청산 "
+                f"{float(pnl_row.get('avgExitPrice') or 0):,.2f} · "
+                f"손익 {float(pnl_row.get('closedPnl') or 0):+,.4f} USDT")
+        else:
+            pnl_note = "청산 손익 기록이 아직 없습니다(거래소 기록 지연)"
+            say(pnl_note)
+    except BybitError as exc:
+        pnl_note = ("데모 계정 정책상 closed-pnl 미지원" if engine.env == "demo"
+                    else "청산 손익 조회 실패")
+        say(f"{pnl_note} — 손익은 거래소 화면에서 확인하세요 ({exc})")
+    except Exception as exc:                  # 미지원 엔드포인트·예상 밖 응답도 여기서 멈춘다
+        pnl_note = "청산 손익 조회 실패"
+        say(f"{pnl_note}: {exc!r}")
+
+    ok = position is not None and not remaining and not order_error
+    if ok:
+        say("시험 주문 끝 — 주문·TP/SL·포지션·청산 파이프라인이 살아 있습니다. 실제 돈은 나가지 않았습니다")
+    elif order_error:
+        say("시험 주문을 끝까지 확인하지 못했습니다 — 위 오류를 확인하세요")
+    else:
+        say("시험 주문을 끝까지 확인하지 못했습니다 — 위 로그를 확인하세요")
+    return {"ok": bool(ok), "refused": None, "order": order, "position": position,
+            "close": close, "remaining": remaining, "closed_pnl": pnl_row,
+            "pnl_note": pnl_note, "order_error": order_error, "events": events}
+
+
 # ---------------------------------------------------------------------- 출력
 
 def print_banner(engine: TestnetAuto) -> None:
@@ -1358,6 +1568,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--state", default=None, help="상태 파일 경로")
     ap.add_argument("--log", default=None, help="로그 파일 경로")
     ap.add_argument("--killswitch", default=None, help="킬스위치 상태 파일 경로")
+    ap.add_argument("--smoke-test", dest="smoke_test", action="store_true",
+                    help="샌드박스 1회 시험 주문 → 3초 뒤 포지션 확인 → 즉시 청산(기록 파일은 건드리지 않음)")
     ap.add_argument("--status", action="store_true", help="계좌·포지션·킬스위치 상태")
     ap.add_argument("--reset", action="store_true", help="로컬 기록 초기화(열린 포지션 있으면 거부)")
     ap.add_argument("--stop", action="store_true", help="진입 수동 정지")
@@ -1424,6 +1636,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
               f"          확실히 꺼져 있다면 그 파일을 지우고 다시 실행하세요.", flush=True)
         return 1
     atexit.register(lock.release)
+
+    if args.smoke_test:
+        # 시험 주문은 기록 파일을 건드리지 않는다 — 잠금만 빌려 돌고 있는 루프와 겹치지 않게 한다.
+        result = run_smoke_test(engine)
+        return 0 if result.get("ok") else 1
 
     if args.reset:
         try:

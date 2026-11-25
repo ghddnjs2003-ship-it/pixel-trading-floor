@@ -55,12 +55,13 @@ Demo Trading도 실돈 없는 모의 USDT만 움직이고, V5 REST 경로·서�
 - 데모 계정은 청산 손익(`/v5/position/closed-pnl`) 같은 **부가 조회가 제한**될 수 있습니다. 그때 청산은
   그대로 기록되고 손익만 '미확인'으로 남으며, 주문·포지션 관리(잔고·포지션·주문)는 계속 돕니다.
 
-## 2. 세 번 눌러 보기 (더블클릭)
+## 2. 네 번 눌러 보기 (더블클릭)
 
 | 파일 | 하는 일 |
 | --- | --- |
 | `run_testnet_auto_mock.bat` | **드라이런** — 키 없이 1회 스캔. "무엇을 할지"만 보여 주고 주문 없음 |
 | `run_testnet_auto_status.bat` | 계좌·포지션·킬스위치·최근 스캔 확인 |
+| `run_testnet_smoke_test.bat` | **시험 주문 1회** — 신호를 기다리지 않고 소액 시장가 진입 → 3초 뒤 포지션 확인 → 즉시 청산 |
 | `run_testnet_auto.bat` | **실테스트넷·데모 루프** — 30분 봉 마감 +90초 점검 · 1분마다 상태 한 줄 · 상황 맞춤 감시(5분) (Ctrl+C로 종료) |
 
 명령어로 직접 돌릴 때:
@@ -74,6 +75,7 @@ python -m backend.testnet_auto --loop --demo     # 데모로 계속 자동
 python -m backend.testnet_auto --loop --adaptive # 상황 맞춤 감시(집중 5분 / 일반 30분)
 python -m backend.testnet_auto --loop --no-adaptive  # 30분 고정
 python -m backend.testnet_auto --status          # 상태
+python -m backend.testnet_auto --smoke-test --demo  # 시험 주문 1회(진입→3초 확인→즉시 청산)
 python -m backend.testnet_auto --stop            # 신규 진입만 정지(포지션 TP/SL은 유지)
 python -m backend.testnet_auto --resume          # 다시 진입 허용
 python -m backend.testnet_auto --reset           # 로컬 기록 초기화(열린 포지션 있으면 거부)
@@ -82,6 +84,35 @@ python -m backend.testnet_auto --reset           # 로컬 기록 초기화(열�
 - `--stop`은 **돌고 있는 루프에도 바로** 먹습니다. 정지 표시 파일(`data/testnet_auto_pause*.txt`)을 쓰고,
   `--resume`이 지웁니다. (킬스위치 메모리 상태만 바꾸면 다음 저장에 덮여 사라지기 때문입니다.)
 - 같은 상태 파일로 **창을 두 개 띄우면** 잠금(`*.lock`)이 두 번째를 멈춥니다 — 같은 봉에 주문이 두 번 나가는 일을 막습니다.
+
+### 2-0. 시험 주문으로 "주문이 진짜 나가는지" 먼저 확인
+
+30분봉 M1 아시아 후보가 서지 않으면 오토 모드는 계속 `HOLD`만 찍습니다. 그럴 때 **주문·TP/SL·포지션·청산
+파이프라인이 살아 있는지** 신호 없이 한 번에 확인하는 것이 `--smoke-test`입니다.
+
+```
+[testnet-auto] 모드: 데모 실주문 - api-demo.bybit.com · 모의 USDT만 움직입니다.
+[smoke-test] 데모 트레이딩 샌드박스(https://api-demo.bybit.com) · BTCUSDT 시장가 1회(롱)
+[smoke-test] 주문 → 3초 뒤 포지션 확인 → 즉시 청산 · 실제 돈은 나가지 않습니다 · 모의매매·오토 모드 기록 파일은 건드리지 않습니다
+[smoke-test] 계좌 50.00 USDT · 현재가 62,000.00 · 손절 61,380.00(−1%) · 목표 63,240.00(+2%)
+[smoke-test] 주문 접수(주문 d1) · 수량 0.002개 · 예상손실 $1.24 / 손실예산 $1.50 · 레버리지 3배 · 명목 $124.00
+[smoke-test] 3초 기다린 뒤 거래소 포지션을 확인합니다
+[smoke-test] 포지션 확인 — Buy 0.002개 · 진입 62,010.00 · 미실현손익 +0.12 USDT · 손절 61,380.00 · 목표 63,250.00
+[smoke-test] 청산 주문 전송(주문 d2)
+[smoke-test] 잔여 포지션 0건 확인 — 주문·포지션·청산까지 정상입니다
+[smoke-test] 거래소 청산 기록 — Buy 0.002개 · 진입 62,010.00 → 청산 61,995.00 · 손익 -0.0400 USDT
+[smoke-test] 시험 주문 끝 — 주문·TP/SL·포지션·청산 파이프라인이 살아 있습니다. 실제 돈은 나가지 않았습니다
+```
+
+- 수량은 오토 모드와 같은 **50 USDT 시드 · 1회 손실 3% · 3배** 규칙이 정합니다(손절 −1%·목표 +2%일 때
+  BTC가 6만 달러대라면 대략 0.002개, 명목 120~150달러).
+- **오토 모드 루프를 먼저 멈춘 뒤** 실행하세요(Ctrl+C). 잠금이 돌고 있는 루프와 겹치면 "이미 실행 중"으로 멈춥니다.
+- 이미 열린 포지션이 있으면 **건드리지 않고** "열린 포지션이 있어 시험 주문을 건너뜁니다"로 끝납니다.
+- 키가 없거나 `--mock`이면 "BYBIT_API_KEY/SECRET이 필요합니다(샌드박스 전용)" 안내만 하고 끝납니다.
+- 데모 계정에서 청산 손익 조회(`closed-pnl`)가 막히면 "데모 계정 정책상 closed-pnl 미지원"으로 남기고,
+  주문·청산 자체는 그대로 확인합니다(손익은 데모 화면에서 봄).
+- 이 주문은 `data/paper_state.json`도 `data/testnet_auto_state.*.json`도 **읽지도 쓰지도 않습니다** —
+  성적표·통계·신호 이력이 그대로입니다.
 
 ### 2-1. 1분 상태 줄 + 상황 맞춤 감시(Adaptive)
 
