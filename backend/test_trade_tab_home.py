@@ -213,8 +213,8 @@ class LayoutTest(unittest.TestCase):
                       "트레이딩 탭은 시안처럼 자기 머리말만 보여야 합니다(대시보드 칩 숨김)")
 
     def test_mobile_hides_ticker_tape(self):
-        self.assertIn("html.trading-view #tape { display: none !important; }", self.css,
-                      "휴대폰 트레이딩 화면에서 잘리던 시황 테이프를 접는다")
+        self.assertIn("html.trading-view #gbar { display: none !important; }", self.css,
+                      "휴대폰 트레이딩 화면에서 잘리던 시황 전광판을 접는다")
         self.assertIn("html.trading-view #trade-page { inset: 48px 0 0; }", self.css)
 
     def test_mobile_home_scrolls(self):
