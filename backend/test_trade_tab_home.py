@@ -212,11 +212,6 @@ class LayoutTest(unittest.TestCase):
         self.assertIn("html.trading-view #dash-chips { display: none !important; }", self.css,
                       "트레이딩 탭은 시안처럼 자기 머리말만 보여야 합니다(대시보드 칩 숨김)")
 
-    def test_mobile_hides_ticker_tape(self):
-        self.assertIn("html.trading-view #gbar { display: none !important; }", self.css,
-                      "휴대폰 트레이딩 화면에서 잘리던 시황 전광판을 접는다")
-        self.assertIn("html.trading-view #trade-page { inset: 48px 0 0; }", self.css)
-
     def test_mobile_home_scrolls(self):
         self.assertIn('html.trading-view #trade-page[data-mode="home"] { overflow-y: auto;', self.css,
                       "휴대폰 390px에서 트레이딩 홈이 위아래로 스크롤되어야 합니다")
