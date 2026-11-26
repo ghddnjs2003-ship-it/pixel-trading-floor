@@ -13,60 +13,52 @@
     "max_bars": 96
   },
   "created_at": "2026-11-19T05:49:16+00:00",
-  "updated_at": "2026-11-26T04:30:34+00:00",
-  "scan_bar": 1795665600000,
-  "scan_count": 278,
+  "updated_at": "2026-11-26T05:00:08+00:00",
+  "scan_bar": 1795667400000,
+  "scan_count": 279,
   "initial_equity": 10000.0,
-  "equity": 10000.0,
-  "position": {
-    "side": "SHORT",
-    "entry": 60337.93,
-    "stop": 61757.759,
-    "target": 54658.6142,
-    "initial_stop": 61757.759,
-    "qty": 0.07043102,
-    "risk_usd": 100.0,
-    "risk": 1419.829,
-    "atr": 473.2763204932895,
-    "signal_time": 1795494600000,
-    "entry_time": "2026-11-24T05:00:34+00:00",
-    "entry_bar_time": 1795496400000,
-    "last_bar_time": 1795665600000,
-    "bars": 95,
-    "ai": {
-      "decision": "PASS",
-      "loss_prob": 45.0,
-      "reason": "4H 및 30분봉 EMA 하락 추세에 순응하는 숏 포지션이며, 1R 이내에 주요 장애물이 없어 4R 목표 달성 가능성이 양호합니다.",
-      "confidence": 50,
-      "risk_flags": [
-        "하단 96봉 범위 하위권(27.7%) 위치로 인한 일부 추격 위험"
-      ],
-      "cached": false,
-      "error": null,
-      "model": "gemini-3.5-flash-lite"
-    },
-    "reasons": [
-      "존 하단 60,551.1 돌파 뒤 첫 리테스트 저항",
-      "손절 61,769.7(ATR) · 목표 1.5R 대체"
-    ]
-  },
-  "closed": [],
+  "equity": 9951.03,
+  "position": null,
+  "closed": [
+    {
+      "side": "SHORT",
+      "entry": 60337.93,
+      "exit": 60960.3896,
+      "stop": 61757.759,
+      "target": 54658.6142,
+      "qty": 0.07043102,
+      "risk_usd": 100.0,
+      "reason": "TIME",
+      "pnl": -48.97,
+      "equity": 9951.03,
+      "r": -0.49,
+      "bars": 96,
+      "signal_time": 1795494600000,
+      "entry_time": "2026-11-24T05:00:34+00:00",
+      "exit_time": "2026-11-26T05:00:07+00:00",
+      "exit_bar_time": 1795667400000,
+      "ai_decision": "PASS",
+      "ai_reason": "4H 및 30분봉 EMA 하락 추세에 순응하는 숏 포지션이며, 1R 이내에 주요 장애물이 없어 4R 목표 달성 가능성이 양호합니다.",
+      "symbol": "BTCUSDT",
+      "lesson": "시간청산 -0.49R → data/memory.md"
+    }
+  ],
   "stats": {
-    "trades": 0,
+    "trades": 1,
     "wins": 0,
-    "losses": 0,
-    "win_rate_pct": null,
-    "net_pnl": 0,
-    "net_pct": 0.0,
-    "profit_factor": null,
-    "avg_r": null,
-    "r_sum": 0,
-    "mdd_pct": 0.0,
-    "max_losing_streak": 0,
+    "losses": 1,
+    "win_rate_pct": 0.0,
+    "net_pnl": -48.97,
+    "net_pct": -0.49,
+    "profit_factor": 0.0,
+    "avg_r": -0.49,
+    "r_sum": -0.49,
+    "mdd_pct": 0.49,
+    "max_losing_streak": 1,
     "targets": 0,
     "stops": 0,
-    "time_exits": 0,
-    "last_trade_at": null
+    "time_exits": 1,
+    "last_trade_at": "2026-11-26T05:00:07+00:00"
   },
   "signals_seen": [
     "1795345200000|LONG",
@@ -79,9 +71,9 @@
     "tripped": false,
     "tripped_until": null,
     "manual_stop": false,
-    "realized_pnl": 0.0,
-    "trades_today": 0,
-    "loss_pct": 0.0,
+    "realized_pnl": -48.97,
+    "trades_today": 1,
+    "loss_pct": 0.49,
     "rules": {
       "daily_loss_pct": 3.0,
       "max_consecutive_losses": 3,
@@ -92,10 +84,12 @@
     }
   },
   "last_scan": {
-    "ts": "2026-11-26T04:30:34+00:00",
-    "bar": "2026-11-26T04:00:00+00:00",
-    "action": "HOLD",
-    "events": [],
-    "price": 61010.9
+    "ts": "2026-11-26T05:00:08+00:00",
+    "bar": "2026-11-26T04:30:00+00:00",
+    "action": "CLOSE",
+    "events": [
+      "청산 TIME -0.49R"
+    ],
+    "price": 60948.2
   }
 }
