@@ -48,6 +48,18 @@
   page.id = 'trade-page';
   page.setAttribute('aria-label', '트레이딩');
   page.dataset.mode = 'home';
+  // 코인·타임프레임 버튼은 문자열을 미리 만들어 둔다 (템플릿 안에 템플릿을 겹치지 않게)
+  const HOME_COINS = ['BTC', 'ETH', 'SOL', 'XRP', 'DOGE'];
+  const HOME_FRAMES = [['15', '15m'], ['30', '30m'], ['60', '1H'], ['240', '4H']];
+  const HOME_COIN_BUTTONS = HOME_COINS.map(function (coin) {
+    var on = coin === 'BTC';
+    return '<button type="button" data-coin="' + coin + '" class="' + (on ? 'active' : '') + '" aria-pressed="' + on + '">' + coin + '</button>';
+  }).join('');
+  const HOME_FRAME_BUTTONS = HOME_FRAMES.map(function (frame) {
+    var on = frame[0] === '15';
+    return '<button type="button" data-frame="' + frame[0] + '" class="' + (on ? 'active' : '') + '" aria-pressed="' + on + '">' + frame[1] + '</button>';
+  }).join('');
+
   page.innerHTML = `
     <section class="trade-home" id="trade-home" aria-label="트레이딩 홈">
       <div class="th-statusbar">
@@ -75,10 +87,10 @@
 
       <div class="th-coins-row">
         <span class="th-coin-badge" title="실전 리스크 기준 최대 3배">코인 3×</span>
-        <div class="th-coins" id="th-coins" role="group" aria-label="코인 선택">${['BTC', 'ETH', 'SOL', 'XRP', 'DOGE'].map((coin) => `<button type="button" data-coin="${coin}" class="${coin === 'BTC' ? 'active' : ''}" aria-pressed="${coin === 'BTC'}'>${coin}</button>`).join('')}</div>
+        <div class="th-coins" id="th-coins" role="group" aria-label="코인 선택">${HOME_COIN_BUTTONS}</div>
       </div>
       <p class="th-chart-meta"><span id="th-tv-symbol">BYBIT:BTCUSDT.P</span> · <span>TradingView 실시간 차트</span></p>
-      <div class="th-frames" id="th-frames" role="group" aria-label="타임프레임">${[['15', '15m'], ['30', '30m'], ['60', '1H'], ['240', '4H']].map(([key, label]) => `<button type="button" data-frame="${key}" class="${key === '15' ? 'active' : ''}" aria-pressed="${key === '15'}'>${label}</button>`).join('')}</div>
+      <div class="th-frames" id="th-frames" role="group" aria-label="타임프레임">${HOME_FRAME_BUTTONS}</div>
       <div class="th-chart">
         <div id="th-tv-chart"></div>
         <div id="th-tv-note" role="status">트레이딩뷰 차트를 불러오는 중…</div>

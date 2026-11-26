@@ -83,11 +83,12 @@ class TradeHomeMarkupTest(unittest.TestCase):
 
     def test_coin_and_frame_buttons(self):
         self.assertIn("코인 3×", self.js)
-        self.assertIn("['BTC', 'ETH', 'SOL', 'XRP', 'DOGE'].map((coin) => `<button type=\"button\" data-coin=\"${coin}\"", self.js,
-                      "BTC·ETH·SOL·XRP·DOGE 코인 버튼이 있어야 합니다")
-        for label in ("'15m'", "'30m'", "'1H'", "'4H'"):
-            self.assertIn(label, self.js, "타임프레임 %s" % label)
-        self.assertIn("data-frame=\"${key}\"", self.js)
+        self.assertIn("const HOME_COINS = ['BTC', 'ETH', 'SOL', 'XRP', 'DOGE'];", self.js)
+        self.assertIn("data-coin=\"' + coin + '\"", self.js)
+        self.assertIn("const HOME_FRAMES = [['15', '15m'], ['30', '30m'], ['60', '1H'], ['240', '4H']];", self.js)
+        self.assertIn("data-frame=\"' + frame[0] + '\"", self.js)
+        self.assertIn("${HOME_COIN_BUTTONS}", self.js)
+        self.assertIn("${HOME_FRAME_BUTTONS}", self.js)
 
     def test_tradingview_chart_is_real_widget(self):
         self.assertIn("BYBIT:BTCUSDT.P", self.js)
