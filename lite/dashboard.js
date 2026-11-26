@@ -1,4 +1,4 @@
-/* PIXEL TRADING FLOOR — 시장 대시보드 탭 (기본 첫 화면)
+/* PIXEL TRADING FLOOR — 트레이딩 탭 (시장 대시보드, 기본 첫 화면)
    · 좌측: 종합 요약(현재가 · 24H 변화 · 지지/저항 · 수급 3대장) + 실시간 캔들 차트 + 데모 트레이딩 CTA
    · 우측: 실시간 수급 스캐너(바이비트 선물 USDT 전체) + 오늘의 일정 & 고래 동향 요약
    · 글로벌 시황 칩은 LiteGlobal이 이미 받아 둔 값읽어 쓴다(값을 새로 지어내지 않는다)
@@ -297,7 +297,7 @@
 
     const page = document.createElement('section');
     page.id = 'dash-page';
-    page.setAttribute('aria-label', '시장 대시보드');
+    page.setAttribute('aria-label', '트레이딩');
     page.innerHTML = `
       <div id="dash-mstrip" role="region" aria-label="글로벌 시황 한 줄 요약">
         <div class="mstrip-scroll">

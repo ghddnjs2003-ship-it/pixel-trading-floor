@@ -18,7 +18,7 @@
   const signed = (n, digits = 2) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${fmt(Math.abs(n), digits)}`;
   const safe = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const tickerUrl = window.LiteLive.URL_TICKER;
-  // 기본 첫 화면 — 시장 대시보드. 다만 소개 페이지 속 임베드(?shell=1·?kiosk=1)는 종전대로 사무실이 먼저다.
+  // 기본 첫 화면 — 트레이딩(시장 대시보드 화면). 다만 소개 페이지 속 임베드(?shell=1·?kiosk=1)는 종전대로 사무실이 먼저다.
   const DEFAULT_VIEW = (new URLSearchParams(location.search).get('shell') === '1' || LITE.kiosk) ? 'office' : 'dash';
 
   const state = {
@@ -32,8 +32,8 @@
   const nav = document.createElement('nav');
   nav.id = 'view-switch';
   nav.setAttribute('aria-label', '화면 전환');
-  // 메인 탭 4개 — 시장 대시보드(기본) · 데모 트레이딩 · 고래·일정 · 픽셀 오피스
-  nav.innerHTML = '<button type="button" data-view="dash">시장 대시보드</button><button type="button" data-view="trading">데모 트레이딩</button><button type="button" data-view="whale" title="실시간 고래 입출금 · 이번 주 경제 일정">고래·일정</button><button type="button" data-view="office">픽셀 오피스</button>';
+  // 메인 탭 4개 — 트레이딩(기본) · 데모 트레이딩 · 고래·일정 · 픽셀 오피스
+  nav.innerHTML = '<button type="button" data-view="dash">트레이딩</button><button type="button" data-view="trading">데모 트레이딩</button><button type="button" data-view="whale" title="실시간 고래 입출금 · 이번 주 경제 일정">고래·일정</button><button type="button" data-view="office">픽셀 오피스</button>';
   topbar.insertBefore(nav, $('#controls'));
   nav.addEventListener('click', (event) => {
     const button = event.target.closest('[data-view]');
