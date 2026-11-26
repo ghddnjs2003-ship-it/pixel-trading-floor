@@ -259,6 +259,9 @@ html.trading-view #dash-chips { display: none !important; }
 @media (max-width: 820px) {
   /* 홈은 문서처럼 위아래로 스크롤된다 — 데모 화면의 '한 칸만 보이는' 잠금은 그대로 */
   html.trading-view #trade-page[data-mode="home"] { overflow-y: auto; overscroll-behavior-y: contain; }
+  /* 시황 테이프는 휴대폰 트레이딩 화면에서 접는다 — 머리말 바로 아래 본문이 오게(테이프가 잘려 보였다) */
+  html.trading-view #tape { display: none !important; }
+  html.trading-view #trade-page { inset: 48px 0 0; }
   .trade-home { gap: 10px; padding: 10px 10px 22px; font-size: 12.5px; }
   .th-statusbar { gap: 6px; }
   .th-conn { padding: 6px 10px; font-size: 11px; }
