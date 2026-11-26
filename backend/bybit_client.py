@@ -758,6 +758,104 @@ class BybitClient:
                 "orderLinkId": result.get("orderLinkId", ""), "payload": payload,
                 "plan": plan.to_dict(), "notes": self.notes + plan.notes}
 
+    def reduce_only_order(self, symbol: str, side: Optional[str] = None, qty=None) -> Dict:
+        """포지션을 **줄이는** 시장가 reduceOnly 주문 — 부분 익절·본절 정리에 쓴다.
+
+        side를 안 주면 포지션의 반대 방향으로 낸다. 수량이 없거나, qtyStep보다 작거나, 최소 주문 수량·
+        최소 명목가에 못 미치거나, 보유 수량을 넘으면 거래소에 보내지 않고 OrderRejected로 멈춘다
+        (포지션을 넘겨 줄이거나 반대 포지션을 여는 일이 없다).
+        """
+        symbol = symbol.upper()
+        positions = [p for p in self.get_positions(symbol) if p["symbol"] == symbol and p["size"] > 0]
+        if not positions:
+            raise OrderRejected(f"{symbol}에 줄일 포지션이 없습니다")
+        position = max(positions, key=lambda p: p["size"])
+        spec = self.get_instrument(symbol)
+        held = floor_to_step(position["size"], spec.qty_step)
+        if qty is None:
+            amount = held
+        else:
+            amount = floor_to_step(qty, spec.qty_step)
+        if amount <= 0:
+            raise OrderRejected(f"{symbol} 부분 청산 수량 {qty}이 qtyStep {fmt_dec(spec.qty_step)} 미만입니다")
+        if amount < spec.min_order_qty:
+            raise OrderRejected(
+                f"{symbol} 부분 청산 수량 {fmt_dec(amount)}이 최소 주문 수량 "
+                f"{fmt_dec(spec.min_order_qty)}보다 작습니다")
+        if amount > held:
+            raise OrderRejected(
+                f"{symbol} 부분 청산 수량 {fmt_dec(amount)}이 보유 {fmt_dec(held)}를 넘습니다")
+        price = self.get_last_price(symbol)
+        if spec.min_notional is not None and float(amount) * float(price) < float(spec.min_notional):
+            raise OrderRejected(
+                f"{symbol} 부분 청산 명목가 ${float(amount) * float(price):,.2f}가 최소 주문 금액 "
+                f"${fmt_dec(spec.min_notional)}보다 작습니다")
+        side_n = self.normalize_side(side) if side else ("Sell" if position["side"] == "Buy" else "Buy")
+        if side_n == position["side"]:
+            raise OrderRejected(f"{symbol} reduceOnly 주문 방향({side_n})이 포지션과 같습니다")
+        payload = {
+            "category": "linear", "symbol": symbol, "side": side_n, "orderType": "Market",
+            "qty": fmt_dec(amount), "positionIdx": 0, "reduceOnly": True,
+        }
+        if self.is_mock:
+            self._mock_seq += 1
+            order_id = f"mock-{self._mock_seq:04d}"
+            row = self._mock_positions.get(symbol)
+            if not row:
+                raise OrderRejected(f"{symbol}에 줄일 포지션이 없습니다")
+            left = float(row["size"]) - float(amount)
+            sign = 1.0 if row["side"] == "Buy" else -1.0
+            pnl = (float(price) - float(row["entryPrice"])) * float(amount) * sign
+            if left <= 1e-12:
+                self._mock_positions.pop(symbol, None)
+            else:
+                row["size"] = left
+            result = {"orderId": order_id}
+            self._mock_orders.append({"payload": payload, "result": result})
+            return {"ok": True, "mock": True, "orderId": order_id, "payload": payload,
+                    "closed": {"symbol": symbol, "side": position["side"],
+                               "qty": fmt_dec(amount), "entryPrice": position["entryPrice"],
+                               "price": float(price), "estimatedPnl": round(pnl, 4),
+                               "remaining": round(max(0.0, left), 8)}}
+        data = self._request("POST", "/v5/order/create", None, payload)
+        result = data.get("result") or {}
+        return {"ok": True, "mock": False, "orderId": result.get("orderId"), "payload": payload}
+
+    def set_trading_stop(self, symbol: str, take_profit=None, stop_loss=None) -> Dict:
+        """열린 포지션의 TP/SL을 바꾼다(포지션 전체, tpslMode Full). None인 쪽은 건드리지 않는다.
+
+        본절 보호처럼 손절선만 옮길 때 쓴다. Bybit 34040("값이 이미 같음")은 실패가 아니다.
+        """
+        symbol = symbol.upper()
+        spec = self.get_instrument(symbol)
+        tp_text = None if take_profit is None else fmt_dec(round_to_step(take_profit, spec.tick_size))
+        sl_text = None if stop_loss is None else fmt_dec(round_to_step(stop_loss, spec.tick_size))
+        if tp_text is None and sl_text is None:
+            return {"ok": True, "mock": self.is_mock, "note": "바꿀 값이 없습니다"}
+        if self.is_mock:
+            row = self._mock_positions.get(symbol)
+            if not row:
+                raise OrderRejected(f"{symbol}에 포지션이 없어 TP/SL을 걸 수 없습니다")
+            if tp_text is not None:
+                row["takeProfit"] = float(tp_text)
+            if sl_text is not None:
+                row["stopLoss"] = float(sl_text)
+            return {"ok": True, "mock": True, "takeProfit": tp_text, "stopLoss": sl_text}
+        body = {"category": "linear", "symbol": symbol, "positionIdx": 0, "tpslMode": "Full",
+                "tpTriggerBy": "LastPrice", "slTriggerBy": "LastPrice"}
+        if tp_text is not None:
+            body["takeProfit"] = tp_text
+        if sl_text is not None:
+            body["stopLoss"] = sl_text
+        try:
+            self._request("POST", "/v5/position/trading-stop", None, body)
+        except BybitAPIError as exc:
+            if getattr(exc, "ret_code", None) == 34040:
+                return {"ok": True, "mock": False, "takeProfit": tp_text, "stopLoss": sl_text,
+                        "note": "이미 같은 값이었습니다"}
+            raise
+        return {"ok": True, "mock": False, "takeProfit": tp_text, "stopLoss": sl_text}
+
     def close_position(self, symbol: str) -> Dict:
         """전량 시장가 청산(reduceOnly). 열린 포지션이 없으면 OrderRejected."""
         symbol = symbol.upper()

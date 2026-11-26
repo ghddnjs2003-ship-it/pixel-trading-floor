@@ -5,8 +5,14 @@
    `LONG`/`SHORT`/`HOLD`를 고르고, 키가 없거나 AI가 실패하면 기술적 필터(EMA20/50 배열 · 4시간 정렬 ·
    RSI14 과매수/과매도 · BB20/2.5σ 이탈)가 대신 고른다. 레버리지 기본 **50배**(1~50 조정 가능),
    1차 증거금은 가용 잔고의 **13%**.
-2) **익절** — 평단 대비 **증거금 +10%**(가격 변동 10/레버리지 %). 1~4차 어느 때든 평단이 바뀌면
-   익절가도 새 평단에서 다시 계산한다(avgReset). 1~3차에는 손절 주문을 걸지 않는다(원본과 같음).
+2) **익절 — 2단계 분할 + 본절 보호**(`--split-tp`, 기본 켜짐) — 평단 대비 **증거금 +10%**(가격 변동
+   10/레버리지 %)에 닿으면 보유의 **50%를 reduce-only 시장가로 부분 익절**하고, 남은 50%의 손절선을
+   **본절(평단 + 증거금 1.5% ≈ 수수료 여유)**로 즉시 올려 원금 손실을 막는다. **+20%**에서 남은 물량을
+   전량 익절한다. 50달러 소액에서 50% 수량·잔여 수량이 거래소 최소 주문 단위(qtyStep/minOrderQty/
+   minNotionalValue)에 못 미치면 분할을 건너뛰고 **+10%에서 전량 익절**로 안전하게 돌아간다(사유를 로그에 남김).
+   `--no-split-tp`면 원본처럼 +10% 전량 익절 하나만 쓴다. 1~4차 어느 때든 평단이 바뀌면 익절가도 새
+   평단에서 다시 계산한다(avgReset). 1~3차에는 (분할 전까지) 손절 주문을 걸지 않는다(원본과 같음).
+   분할이 켜져 있는 동안 거래소 TP는 **2차 목표(+20%)**에 걸리므로, 1차 부분 익절은 이 엔진이 한다.
 3) **물타기 2·3·4차** — `basis: margin`(선은 증거금 %). 차수마다 **그 순간 평단**에서 다시 잰다.
    - 2차: 증거금 **-25%** 도달 + 5분봉 **RSI(14)** 롱 `<35`/숏 `>65` → 가용 잔고의 **15%** 추가.
      조건이 없어도 증거금 **-40%**(강제선)에 도달하면 추가한다(원본 `dcaDecision`의 force).
@@ -19,8 +25,12 @@
    증거금 `--sl-pct`(기본 50%) 지점에 건다.
 5) **종목** — 기본 `ETHUSDT`(50달러 시드로도 4분할 최소 주문 가능), `SOLUSDT`·`BTCUSDT` 지원.
    최소 주문 수량·최소 명목가 미달이면 주문하지 않고 사유에 숫자를 남긴다.
-6) **루프** — 기본 30초마다 가격으로 물타기 선·청산을 보고, 5분봉이 마감될 때만 1차 진입을 새로 판단한다.
-   대기 중 1분마다 상태 한 줄. Ctrl+C 즉시 종료(열린 포지션의 TP/SL은 거래소에 남는다).
+6) **루프** — 포지션이 **없을 때**는 30초마다 봉으로 물타기 선을 보고, 5분봉이 마감될 때만 1차 진입을
+   새로 판단한다(AI 호출도 그때 한 번 — 무료 한도 보호). 포지션이 **열려 있는 동안**은 **5초마다**
+   바이비트 현재가(시세 티커만 조회)를 읽어 1차 분할 익절·본절 이탈·2차 익절·물타기 선 도달을 즉시
+   확인한다. 조건(RSI·볼린저)은 마지막 5분봉 스캔이 남긴 결과를 쓰고, 강제선은 가격만으로 판단한다.
+   물타기 차수·시간 청산처럼 봉이 필요한 처리는 5초 감시가 "전체 점검"으로 넘긴다. 대기 중 1분마다
+   상태 한 줄. Ctrl+C 즉시 종료(열린 포지션의 TP/SL은 거래소에 남는다).
 
 지키는 선 (절대)
 - **데모 전용**: `BybitClient`의 `env="demo"`(api-demo.bybit.com)만 받는다. 테스트넷·메인넷 클라이언트는
@@ -37,7 +47,8 @@
 실행
     python -m backend.demo_dca_experiment --once                  # 1회 점검(키 없으면 mock)
     python -m backend.demo_dca_experiment --once --mock           # 키가 있어도 드라이런
-    python -m backend.demo_dca_experiment --loop                  # 30초 점검 · 1분 상태 줄
+    python -m backend.demo_dca_experiment --loop                  # 포지션 없으면 30초 · 있으면 5초 감시
+    python -m backend.demo_dca_experiment --loop --no-split-tp    # 원본처럼 +10% 전량 익절만
     python -m backend.demo_dca_experiment --status                # 계좌·포지션·차수·성적
     python -m backend.demo_dca_experiment --reset / --stop / --resume
     run_demo_dca_experiment.bat                                   # Windows 더블클릭
@@ -90,6 +101,10 @@ RSI_WINDOW = 99                         # dca-ind.js rsiBars
 STALE_MS = 600_000                      # 마지막 완성봉이 10분 넘게 옛것이면 조건은 거짓
 DEFAULT_SCAN_SEC = 30
 DEFAULT_STATUS_SEC = 60
+DEFAULT_POS_TICK_SEC = 5                # 포지션이 열려 있는 동안 현재가를 보는 간격(초)
+DEFAULT_TP2_PCT = 20.0                  # 분할 익절 2차 목표(증거금 +20%)
+DEFAULT_TP1_FRAC = 0.5                  # 1차에서 익절하는 보유 비율
+DEFAULT_BE_PCT = 1.5                    # 1차 뒤 본절 손절 = 평단 + 증거금 1.5%(수수료 여유)
 RETRY_SEC = 60
 
 DEFAULT_LEV = 50.0
@@ -146,7 +161,12 @@ class DCAConfig:
     symbol: str = "ETHUSDT"
     leverage: float = DEFAULT_LEV
     first_pct: float = 13.0              # 1차 증거금 = 가용 잔고 × 이 %(원본 member.firstPct)
-    tp_pct: float = 10.0                 # 증거금 기준 익절 %(원본 member.tpPct)
+    tp_pct: float = 10.0                 # 증거금 기준 1차 익절 %(원본 member.tpPct)
+    split_tp: bool = True                # 2단계 분할 익절 + 본절 보호(끄면 +tp_pct 전량 익절)
+    tp2_pct: float = DEFAULT_TP2_PCT     # 2차 목표(남은 물량) — 증거금 %
+    tp1_frac: float = DEFAULT_TP1_FRAC   # 1차에서 줄이는 비율(0.5 = 50%)
+    be_pct: float = DEFAULT_BE_PCT       # 1차 뒤 본절 손절(증거금 %)
+    pos_tick_sec: int = DEFAULT_POS_TICK_SEC   # 포지션 보유 중 현재가 확인 간격(초)
     cap_pct: float = 100.0               # 운용 상한(가용 잔고 대비 %) — 원본 autoRun.capPct
     source: str = "auto"                 # 5분봉 출처 auto|bybit|okx|bitget
     limit: int = 200                     # 받을 5분봉 수
@@ -189,6 +209,14 @@ def validate_settings(cfg: DCAConfig) -> None:
         raise ValueError(f"1차 비중은 1~30%만 허용합니다: {cfg.first_pct}%")
     if not (5.0 <= float(cfg.tp_pct) <= 50.0):
         raise ValueError(f"익절(증거금)은 5~50%만 허용합니다: {cfg.tp_pct}%")
+    if not (float(cfg.tp_pct) < float(cfg.tp2_pct) <= 200.0):
+        raise ValueError(f"2차 목표는 1차({cfg.tp_pct}%)보다 크고 200% 이하여야 합니다: {cfg.tp2_pct}%")
+    if not (0.1 <= float(cfg.tp1_frac) <= 0.9):
+        raise ValueError(f"분할 비율은 10~90%만 허용합니다: {cfg.tp1_frac}")
+    if not (0.0 <= float(cfg.be_pct) < float(cfg.tp_pct)):
+        raise ValueError(f"본절 손절은 0 이상 1차 익절({cfg.tp_pct}%) 미만이어야 합니다: {cfg.be_pct}%")
+    if not (1 <= int(cfg.pos_tick_sec) <= 300):
+        raise ValueError(f"포지션 감시 간격은 1~300초만 허용합니다: {cfg.pos_tick_sec}초")
     if not (1.0 <= float(cfg.cap_pct) <= 100.0):
         raise ValueError(f"운용 상한은 1~100%만 허용합니다: {cfg.cap_pct}%")
     if str(cfg.sl_mode) not in ("auto", "pct", "off"):
@@ -271,6 +299,19 @@ def _f(value) -> float:
 
 def _side_ko(side: str) -> str:
     return "롱" if str(side).lower() in ("buy", "long") else "숏"
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    """환경변수 참·거짓 — DCA_SPLIT_TP 같은 스위치용(이상한 값은 기본값)."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    value = str(raw).strip().lower()
+    if value in ("1", "true", "yes", "on", "y"):
+        return True
+    if value in ("0", "false", "no", "off", "n"):
+        return False
+    return default
 
 
 def _dir_of(side: str) -> int:
@@ -457,6 +498,56 @@ def pct_stop_price(dir_: int, avg: float, sl_pct: float, lev: float, tick) -> De
     return k * unit
 
 
+def breakeven_stop_price(dir_: int, avg: float, be_pct: float, lev: float, tick) -> Decimal:
+    """본절 손절가 = 평단 × (1 + 방향 × 본절%(증거금) / (100×배율)) — 최소 1 tick 수익 쪽.
+
+    50배에서 증거금 +1.5%는 가격 +0.03%다. tickSize가 그보다 크면 1 tick만 수익 쪽에 둔다
+    (거래소는 손절가가 진입가와 같으면 주문을 거부한다).
+    """
+    if not (avg > 0) or not (lev > 0) or not (tick > 0):
+        return Decimal("0")
+    raw = float(avg) * (1 + (dir_ * float(be_pct or 0.0)) / (100.0 * float(lev)))
+    unit = _dec(tick)
+    base = _dec(avg) / unit
+    n = (_dec(raw) / unit)
+    if dir_ == 1:
+        k = max(n.to_integral_value(rounding=ROUND_CEILING),
+                base.to_integral_value(rounding=ROUND_FLOOR) + 1)
+    else:
+        k = min(n.to_integral_value(rounding=ROUND_FLOOR),
+                base.to_integral_value(rounding=ROUND_CEILING) - 1)
+    return k * unit
+
+
+def split_qty(qty, spec: Instrument, frac: float = 0.5,
+              price: Optional[float] = None) -> Tuple[Decimal, Optional[str]]:
+    """분할 익절 수량 — 보유의 frac(기본 50%)을 qtyStep으로 내림한다.
+
+    (수량, 실패 사유). 부분 수량·잔여 수량이 최소 주문 수량에 못 미치거나 부분 명목가가 최소 주문
+    금액에 못 미치면 수량 0과 사유를 돌려준다 — 호출 쪽은 전량 익절로 돌아간다(소액 폴백).
+    """
+    total = floor_to_step(qty, spec.qty_step)
+    if total <= 0:
+        return Decimal("0"), "보유 수량이 없습니다"
+    part = floor_to_step(_dec(total) * _dec(frac), spec.qty_step)
+    rest = _dec(total) - part
+    if part <= 0:
+        return Decimal("0"), (f"분할 수량이 최소 주문 수량({fmt_dec(spec.min_order_qty)})·"
+                              f"qtyStep({fmt_dec(spec.qty_step)})에 못 미칩니다")
+    if part < spec.min_order_qty:
+        return Decimal("0"), (f"분할 수량 {fmt_dec(part)}이 최소 주문 수량 "
+                              f"{fmt_dec(spec.min_order_qty)} 미만입니다")
+    if rest < spec.min_order_qty:
+        return Decimal("0"), (f"남는 수량 {fmt_dec(rest)}이 최소 주문 수량 "
+                              f"{fmt_dec(spec.min_order_qty)} 미만입니다")
+    if spec.min_notional is not None and price:
+        notional = float(part) * float(price)
+        if notional < float(spec.min_notional):
+            return Decimal("0"), (f"분할 명목가 ${notional:,.2f}가 최소 주문 금액 "
+                                  f"${fmt_dec(spec.min_notional)} 미만입니다")
+    return part, None
+
+
 def liq_of(dir_: int, avg: float, lev: float, liquid_price=None) -> Optional[Dict]:
     """청산가 — 거래소 값이 손실 쪽이고 평단과 0.1%~1/L 사이라면 그것, 아니면 경험식(원본 liqOf)."""
     if dir_ not in (1, -1) or not (avg > 0) or not (lev >= 1):
@@ -587,7 +678,23 @@ class DcaBybitClient(BybitClient):
             pos = self._mock_positions.get(symbol)
             if pos and float(pos.get("size") or 0) > 0:
                 if str(pos.get("side")) != side_n:
-                    raise OrderRejected(f"{symbol}에 반대 포지션({pos.get('side')})이 있습니다 — 한 방향만 물타기합니다")
+                    if not reduce_only:
+                        raise OrderRejected(f"{symbol}에 반대 포지션({pos.get('side')})이 있습니다 — 한 방향만 물타기합니다")
+                    # reduce-only 부분 익절 — 보유를 줄이고 남은 수량을 돌려준다
+                    old_size = float(pos["size"])
+                    cut = min(float(amount), old_size)
+                    left = old_size - cut
+                    sign = 1.0 if str(pos["side"]) == "Buy" else -1.0
+                    pnl = (price - float(pos["entryPrice"])) * cut * sign
+                    if left <= 1e-12:
+                        self._mock_positions.pop(symbol, None)
+                    else:
+                        pos["size"] = left
+                    self._mock_orders.append({"payload": payload, "result": {"orderId": order_id}})
+                    return {"ok": True, "mock": True, "orderId": order_id, "payload": payload,
+                            "fill_price": price, "closed": {"qty": cut, "price": price,
+                                                             "estimatedPnl": round(pnl, 4),
+                                                             "remaining": round(max(0.0, left), 8)}}
                 if reduce_only:
                     raise OrderRejected("mock에서는 reduceOnly 추가 주문을 쓰지 않습니다")
                 old_size = float(pos["size"])
@@ -990,6 +1097,11 @@ class DemoDcaExperiment:
             "bars": {"tf": BAR_TF, "closedOnly": True},
             "leverage": float(self.cfg.leverage), "firstPct": float(self.cfg.first_pct),
             "tpPct": float(self.cfg.tp_pct), "capPct": float(self.cfg.cap_pct),
+            "splitTp": {"on": bool(self.cfg.split_tp), "tp1Pct": float(self.cfg.tp_pct),
+                        "tp2Pct": float(self.cfg.tp2_pct), "frac": float(self.cfg.tp1_frac),
+                        "bePct": float(self.cfg.be_pct), "basis": "margin",
+                        "fallback": "minQty/minNotional 미달이면 +tp1Pct 전량 익절"},
+            "posTickSec": int(self.cfg.pos_tick_sec),
             "stages": [s.to_dict() for s in self.cfg.stages],
             "reserveLevPct": self.cfg.reserve_lev_pct,
             "autoSl": {"afterStage": LAST_STAGE, "mode": self.cfg.sl_mode,
@@ -1093,8 +1205,11 @@ class DemoDcaExperiment:
             "stops": sum(1 for t in closed if t.get("reason") == "STOP"),
             "liquidations": sum(1 for t in closed if t.get("reason") == "LIQUIDATION"),
             "time_exits": sum(1 for t in closed if t.get("reason") == "TIME"),
+            "breakeven_exits": sum(1 for t in closed if t.get("reason") == "BREAKEVEN"),
+            "partial_trades": sum(1 for t in closed if int(t.get("tp_stage") or 0) >= 1),
+            "partial_pnl": round(sum(float(t.get("partial_pnl") or 0.0) for t in closed), 4),
             "other_exits": sum(1 for t in closed if t.get("reason") not in
-                               ("TARGET", "STOP", "LIQUIDATION", "TIME")),
+                               ("TARGET", "STOP", "LIQUIDATION", "TIME", "BREAKEVEN")),
             "stage4": sum(1 for t in closed if int(t.get("stage") or 1) >= 4),
             "avg_stage": round(sum(int(t.get("stage") or 1) for t in closed) / len(closed), 2) if closed else None,
             "estimated_pnl": sum(1 for t in closed if t.get("pnl_source") not in (None, "exchange")),
@@ -1199,6 +1314,116 @@ class DemoDcaExperiment:
         return self._finish(state, last, action, events, source=source, bars=len(bars),
                             price=price, account=account, ai=ai_result, order=order)
 
+    # ------------------------------------------------------------------ 5초 포지션 감시
+
+    def monitor_position(self, price: Optional[float] = None,
+                         now_ms: Optional[int] = None) -> Dict:
+        """포지션이 열려 있는 동안의 **5초 감시 한 번** — 시세(티커)만 읽고 바로 판단한다.
+
+        * 캔들도 AI도 부르지 않는다(무료 한도 보호). 물타기 조건(RSI·볼린저)은 마지막 5분봉 스캔이
+          남긴 `cond_ok`를 쓰고, **강제선은 가격만으로** 판단한다.
+        * 1차 목표 도달 → 절반 reduce-only 익절 + 본절 손절 이동, 2차 목표 도달 → 남은 물량 청산.
+        * 본절 아래로 돌아서면(mock) 본절 청산으로 기록한다(실주문은 거래소 SL이 한다).
+        * 물타기 차수·시간 청산처럼 봉이 필요한 처리는 `delegate=True`로 돌려주고,
+          호출 쪽이 `tick()`을 부른다(가격만으로는 수량·조건 이력을 정확히 못 짚기 때문).
+        """
+        now_ms = int(now_ms if now_ms is not None else self.now().timestamp() * 1000)
+        state = self.load_state()
+        pos = state.get("position")
+        rec: Dict = {"ts": self.now().isoformat(timespec="seconds"), "kind": "monitor",
+                     "mode": self.mode, "env": self.env, "sandbox_only": True,
+                     "base_url": self.client.base_url, "action": "IDLE", "price": None,
+                     "events": [], "delegate": False, "position": None,
+                     "margin_pnl_pct": None, "stage": None, "tp_stage": None}
+        if not pos:
+            rec["events"] = ["포지션 없음 — 다음 5분봉 마감까지 기다립니다"]
+            return rec
+        px = price
+        if px is None:
+            try:
+                px = float(self.client.get_last_price(self.cfg.symbol))
+            except (BybitError, ValueError, TypeError):
+                px = self._last_price
+        if not px or float(px) <= 0:
+            rec["action"] = "ERROR"
+            rec["events"] = ["시세 조회 실패 — 다음 감시에서 다시 봅니다"]
+            return rec
+        px = float(px)
+        self._last_price = px
+        if self.mock:
+            self.client.set_mock_price(self.cfg.symbol, px)
+        rec["price"] = _num(px)
+        dir_ = int(pos.get("dir") or _dir_of(pos.get("side")))
+        avg = float(pos.get("avg") or 0.0)
+        lev = float(pos.get("leverage") or self.cfg.leverage)
+        profit = -adverse_pct(dir_, avg, px, lev)
+        rec["margin_pnl_pct"] = _num(profit, 1)
+        rec["stage"] = int(pos.get("stage") or 1)
+        rec["tp_stage"] = int(pos.get("tp_stage") or 0)
+        targets = self._targets(pos)
+        events: List[str] = []
+        action = "WAIT"
+        account = {"equity": state.get("equity")}
+        if pos.get("force_close"):
+            rec["delegate"] = True
+            events.append("자동 손절 자리를 지나 정리가 필요합니다 — 전체 점검을 바로 돌립니다")
+            action = "DELEGATE"
+        elif targets["ladder"] and not targets["done"] and profit >= float(self.cfg.tp_pct) - 1e-9:
+            done, note = self._partial_tp(state, pos, px)
+            events.append(note)
+            action = "TP1" if done else "FALLBACK"
+            if not done and self.mock:
+                # 폴백 — 거래소 TP가 +tp_pct%에 걸려 있으니 mock은 그 가격에서 전량 청산으로 본다
+                if dir_ * (px - float(targets["tp1"])) >= 0:
+                    _a, evs = self._close(state, pos, None, account, None, reason="TARGET",
+                                          exit_price=px, now_ms=now_ms)
+                    events += evs
+        elif targets["done"] and profit >= (float(self.cfg.tp2_pct) if targets["ladder"]
+                                           else float(self.cfg.tp_pct)) - 1e-9:
+            if self.mock:
+                action, evs = self._close(state, pos, None, account, None, reason="TARGET",
+                                          exit_price=px, now_ms=now_ms)
+                events += evs
+            else:
+                events.append(f"목표(증거금 +{self.cfg.tp2_pct:g}%) 도달 — 거래소 TP가 남은 물량을 익절합니다")
+        elif targets["done"] and float(pos.get("be") or 0) > 0 and dir_ * (px - float(pos["be"])) <= 0:
+            if self.mock:
+                action, evs = self._close(state, pos, None, account, None, reason="BREAKEVEN",
+                                          exit_price=float(pos["be"]), now_ms=now_ms)
+                events += evs
+            elif not pos.get("stop"):
+                rec["delegate"] = True
+                action = "DELEGATE"
+                events.append("본절 손절이 아직 걸리지 않은 상태에서 가격이 본절 아래로 — "
+                              "전체 점검으로 바로 보호합니다")
+            else:
+                events.append(f"가격이 본절 {float(pos['be']):,.2f} 아래로 — 거래소 손절이 나갑니다")
+        else:
+            next_stage = int(pos.get("stage") or 1) + 1
+            rule = stage_rule(self.cfg, next_stage)
+            adverse = adverse_pct(dir_, avg, px, lev)
+            if rule is not None:
+                cond_ok = bool((pos.get("cond_ok") or {}).get(str(next_stage)))
+                decision = dca_decision(adverse, rule, cond_ok)
+                if decision:
+                    rec["delegate"] = True
+                    action = "DELEGATE"
+                    events.append(
+                        f"{next_stage}차 {'강제선' if decision == 'force' else '조건선'} 도달"
+                        f"(증거금 {-adverse:+.1f}%) — 5분봉 점검으로 바로 물타기를 실행합니다")
+        if not events:
+            next_stage = int(pos.get("stage") or 1) + 1
+            events.append(f"감시 중 — 다음 {next_stage}차/목표까지 기다립니다")
+        rec["action"] = action
+        rec["events"] = events
+        rec["position"] = self._position_view(state)
+        state["last_monitor"] = {k: rec[k] for k in ("ts", "action", "price", "margin_pnl_pct",
+                                                    "events", "tp_stage")}
+        state["monitor_count"] = int(state.get("monitor_count") or 0) + 1
+        self.save_state(state)
+        self._log_record(state, rec)
+        return rec
+
     # ------------------------------------------------------------------ 보유 관리
 
     def _manage(self, state: Dict, pos: Dict, ex: Dict, bars: List[Dict], bars_4h: List[Dict],
@@ -1229,14 +1454,35 @@ class DemoDcaExperiment:
                                          exit_price=exit_price, now_ms=now_ms)
             label = "손절" if reason == "STOP" else "청산"
             return action, events + [f"자동 손절 자리를 이미 지나 {label}했습니다"], None, None
-        # 2) mock은 봉 고저로 TP/SL 체결을 흉내 낸다
+        # 2) mock은 봉 고저로 TP/SL 체결을 흉내 낸다(분할 1차도 같은 봉에서 본다)
         if self.mock:
             hit = self._mock_exit(pos, bars, price)
             if hit:
-                action, events = self._close(state, pos, None, account, last,
-                                             reason=hit["reason"], exit_price=hit["price"],
-                                             now_ms=now_ms)
-                return action, events, None, None
+                if hit.get("partial"):
+                    done, note = self._partial_tp(state, pos, hit["price"])
+                    events.append(note)
+                    if done:
+                        return "TP1", events, None, None
+                    hit = self._mock_exit(pos, bars, price)      # 폴백 — 같은 봉에서 전량 익절
+                    if not hit or hit.get("partial"):
+                        return "WAIT", events, None, None
+                action, evs = self._close(state, pos, None, account, last,
+                                          reason=hit["reason"], exit_price=hit["price"],
+                                          now_ms=now_ms)
+                return action, events + evs, None, None
+        # 2-b) 실주문 — 5초 감시가 놓졌더라도 봉 점검에서 1차 분할/2차 목표를 다시 본다
+        if not self.mock:
+            targets = self._targets(pos)
+            profit = -adverse_pct(pos["dir"], pos["avg"], price, lev)
+            if targets["ladder"] and not targets["done"] and profit >= float(self.cfg.tp_pct) - 1e-9:
+                done, note = self._partial_tp(state, pos, price)
+                events.append(note)
+                if done:
+                    return "TP1", events, None, None
+            elif targets["done"] and profit >= float(self.cfg.tp2_pct) - 1e-9:
+                action, evs = self._close(state, pos, ex, account, last, reason="TARGET",
+                                          exit_price=price, now_ms=now_ms)
+                return action, events + evs, None, None
         # 3) 시간 청산
         if self.cfg.time_exit and self._bars_held(pos, last) >= int(self.cfg.max_hold_bars):
             action, events = self._close(state, pos, ex, account, last, reason="TIME", now_ms=now_ms)
@@ -1253,6 +1499,8 @@ class DemoDcaExperiment:
         adverse = adverse_pct(pos["dir"], pos["avg"], price, lev)
         closes = [float(b["c"]) for b in bars]
         cond_ok = cond_met(rule, pos["dir"], closes, price, last["t"], now_ms)
+        # 5초 감시가 캔들 없이도 조건을 볼 수 있게 결과를 남겨 둔다(다음 5분봉에서 다시 계산)
+        pos["cond_ok"] = {**(pos.get("cond_ok") or {}), str(next_stage): bool(cond_ok)}
         decision = dca_decision(adverse, rule, cond_ok)
         cond_label = ("RSI14" if rule.cond == "rsi" else f"BB{rule.bb_len}/{rule.bb_k:g}σ")
         if decision is None:
@@ -1303,25 +1551,54 @@ class DemoDcaExperiment:
         notes = self._apply_protection(state["position"], last, price)
         return True, notes
 
+    def _targets(self, pos: Dict) -> Dict:
+        """이 포지션의 다음 목표·거래소 TP·본절 손절가 — 분할 여부를 한 곳에서 정한다.
+
+        분할이 켜졌고 1차를 아직 안 했으면 거래소 TP를 **2차(+tp2_pct%)**에 걸어 둔다(1차 부분 익절을
+        거래소 TP가 먼저 전량 청산해 버리지 않게). 1차 뒤에는 다음 목표가 2차이고, 소액 폴백이면
+        거래소 TP가 **+tp_pct% 전량 익절**이다.
+        """
+        spec = self.client.get_instrument(self.cfg.symbol)
+        dir_ = int(pos.get("dir") or _dir_of(pos.get("side")))
+        avg = float(pos.get("avg") or 0.0)
+        lev = float(pos.get("leverage") or self.cfg.leverage)
+        ladder = bool(self.cfg.split_tp) and not pos.get("split_off")
+        done = int(pos.get("tp_stage") or 0) >= 1
+        if avg <= 0:
+            return {"tp1": 0.0, "tp2": 0.0, "next": 0.0, "exchange": 0.0, "be": 0.0,
+                    "ladder": ladder, "done": done}
+        t1 = float(tp_price_for(dir_, avg, self.cfg.tp_pct, lev, spec.tick_size))
+        t2 = float(tp_price_for(dir_, avg, self.cfg.tp2_pct, lev, spec.tick_size))
+        return {"tp1": t1, "tp2": t2,
+                "next": t2 if done else t1,
+                "exchange": t2 if ladder else t1,
+                "be": float(breakeven_stop_price(dir_, avg, self.cfg.be_pct, lev, spec.tick_size)),
+                "ladder": ladder, "done": done}
+
     def _ensure_protection(self, pos: Dict, ex: Dict, last: Dict) -> Optional[str]:
-        """한 봉에 한 번 거래소 TP(4차면 SL도)를 새 평단과 맞춘다 — 설정 실패·재시작 뒤에도 자리를 잡는다."""
+        """한 봉에 한 번 거래소 TP(4차면 SL, 1차 익절 뒤에는 본절 SL)를 내 평단과 맞춘다."""
         if pos.get("tp_check_bar") == int(last["t"]):
             return None
         pos["tp_check_bar"] = int(last["t"])
         spec = self.client.get_instrument(self.cfg.symbol)
-        dir_ = int(pos.get("dir") or 1)
         avg = float(pos.get("avg") or 0.0)
         if avg <= 0:
             return None
-        want_tp = float(tp_price_for(dir_, avg, self.cfg.tp_pct, float(pos.get("leverage") or self.cfg.leverage),
-                                    spec.tick_size))
+        targets = self._targets(pos)
+        want_tp = float(targets["exchange"])
+        pos["tp"] = targets["next"]
+        pos["tp1"] = targets["tp1"]
+        pos["tp2"] = targets["tp2"]
+        pos["be"] = targets["be"]
         have_tp = _f(ex.get("takeProfit"))
         need_tp = abs(have_tp - want_tp) > float(spec.tick_size) * 1.5
-        want_sl = float(pos.get("stop") or 0.0) or None
+        want_sl: Optional[float] = None
+        if targets["done"] and targets["be"] > 0:
+            want_sl = float(targets["be"])                      # 1차 익절 뒤 본절 보호
+        elif int(pos.get("stage") or 1) >= LAST_STAGE and self.cfg.sl_mode != "off":
+            want_sl = float(pos.get("stop") or 0.0) or None
         have_sl = _f(ex.get("stopLoss"))
-        need_sl = (int(pos.get("stage") or 1) >= LAST_STAGE and self.cfg.sl_mode != "off"
-                   and want_sl is not None and abs(have_sl - want_sl) > float(spec.tick_size) * 1.5)
-        pos["tp"] = want_tp
+        need_sl = want_sl is not None and abs(have_sl - want_sl) > float(spec.tick_size) * 1.5
         if not (need_tp or need_sl):
             return None
         try:
@@ -1329,17 +1606,74 @@ class DemoDcaExperiment:
                                          stop_loss=want_sl if need_sl else None)
         except BybitError as exc:
             return f"TP/SL 다시 걸기 실패: {exc}"
-        return "거래소 TP/SL을 새 평단에 맞췄습니다"
+        return ("거래소 TP/SL을 새 평단·본절에 맞췄습니다" if targets["done"]
+                else "거래소 TP/SL을 새 평단에 맞췄습니다")
+
+    def _partial_tp(self, state: Dict, pos: Dict, price: float) -> Tuple[bool, str]:
+        """1차 목표에서 보유의 절반을 reduce-only로 익절하고 남은 물량 손절을 본절로 올린다.
+
+        분할 수량·잔여 수량이 거래소 최소 단위에 못 미치면 주문하지 않고 `split_off`를 남겨
+        +tp_pct%에서 전량 익절로 돌아간다(소액 폴백). 실패 사유는 문장으로 돌려준다.
+        """
+        spec = self.client.get_instrument(self.cfg.symbol)
+        dir_ = int(pos.get("dir") or _dir_of(pos.get("side")))
+        avg = float(pos.get("avg") or 0.0)
+        qty = float(pos.get("qty") or 0.0)
+        part, why = split_qty(qty, spec, float(self.cfg.tp1_frac), price)
+        if part <= 0:
+            pos["split_off"] = why or "분할 불가"
+            notes = self._apply_protection(pos, None, price)        # 거래소 TP를 +tp1% 전량으로 되돌린다
+            tail = (" · " + " · ".join(notes)) if notes else ""
+            return False, (f"분할 익절 건너뜀 — {why} → 평단 대비 증거금 +{self.cfg.tp_pct:g}%에서 "
+                           f"전량 익절로 대체합니다{tail}")
+        side = "Sell" if dir_ == 1 else "Buy"
+        try:
+            order = self.client.reduce_only_order(self.cfg.symbol, side, part)
+        except (OrderRejected, BybitError) as exc:
+            return False, f"1차 분할 익절 실패: {exc} — 다음 감시에서 다시 시도합니다"
+        try:
+            ex = self.client.get_position(self.cfg.symbol)
+        except BybitError:
+            ex = None
+        rest = float((ex or {}).get("size") or 0.0) or max(0.0, qty - float(part))
+        realized = dir_ * (float(price) - avg) * float(part)
+        pos["realized"] = round(float(pos.get("realized") or 0.0) + realized, 6)
+        pos["margin_total"] = round(float(pos.get("margin_total") or pos.get("margin") or 0.0), 4)
+        pos["qty"] = round(rest, 8)
+        pos["margin"] = round(rest * avg / max(1.0, float(pos.get("leverage") or 1)), 4)
+        pos["tp_stage"] = 1
+        pos["partial"] = {"at": self.now().isoformat(timespec="seconds"),
+                          "qty": _num(float(part), 8), "price": _num(price),
+                          "realized": _num(realized, 4), "order_id": (order or {}).get("orderId")}
+        pos["fills"] = list(pos.get("fills") or []) + [{
+            "stage": "TP1", "qty": _num(float(part), 8), "price": _num(price),
+            "margin": None, "at": self.now().isoformat(timespec="seconds"),
+            "bar": None, "order_id": (order or {}).get("orderId"), "trigger": "partial_tp"}]
+        notes = self._apply_protection(pos, None, price)            # TP → 2차, SL → 본절
+        pos["tp_check_bar"] = None
+        note = (f"1차 분할 익절 {float(part):g}개 @ {float(price):,.2f} "
+                f"(실현 {realized:+.2f} USDT) · 남은 {rest:g}개 · 본절 손절 "
+                f"{float(pos.get('be') or 0):,.2f} · 2차 목표 {float(pos.get('tp2') or 0):,.2f}"
+                f"(증거금 +{self.cfg.tp2_pct:g}%)")
+        if notes:
+            note += " · " + " · ".join(notes)
+        return True, note
 
     def _bars_held(self, pos: Dict, last: Dict) -> int:
         entry_bar = int(pos.get("entry_bar") or 0)
         return max(0, (int(last["t"]) - entry_bar) // self.tf_ms + 1) if entry_bar else 0
 
     def _mock_exit(self, pos: Dict, bars: List[Dict], price: float) -> Optional[Dict]:
-        """mock 청산 — 진입 봉 이후 봉 고저가 TP/SL을 건드렸는지(없으면 현재가)."""
-        tp = float(pos.get("tp") or 0.0)
+        """mock 청산 — 진입 봉 이후 봉 고저가 1차·2차 목표와 손절을 건드렸는지(없으면 현재가).
+
+        분할이 켜져 있고 1차 전이면 1차 목표에 닿는 순간을 `partial`로 돌려준다(호출 쪽이 절반 익절).
+        """
         stop = float(pos.get("stop") or 0.0)
         dir_ = int(pos.get("dir") or _dir_of(pos.get("side")))
+        targets = self._targets(pos)
+        ladder = bool(targets["ladder"]) and not targets["done"]
+        t1 = float(targets["tp1"] or 0.0)
+        exit_tp = float(targets["exchange"] or 0.0)
         from_ms = int(pos.get("last_fill_bar") or pos.get("entry_bar") or 0) + self.tf_ms
         seq = [b for b in bars if int(b["t"]) >= from_ms]
         for bar in seq:
@@ -1349,21 +1683,24 @@ class DemoDcaExperiment:
                     return {"reason": "STOP", "price": stop}
                 if dir_ == -1 and high >= stop:
                     return {"reason": "STOP", "price": stop}
-            if tp > 0:
-                if dir_ == 1 and high >= tp:
-                    return {"reason": "TARGET", "price": tp}
-                if dir_ == -1 and low <= tp:
-                    return {"reason": "TARGET", "price": tp}
+            if ladder and t1 > 0:
+                if (dir_ == 1 and high >= t1) or (dir_ == -1 and low <= t1):
+                    return {"reason": "TP1", "price": t1, "partial": True}
+            if exit_tp > 0:
+                if dir_ == 1 and high >= exit_tp:
+                    return {"reason": "TARGET", "price": exit_tp}
+                if dir_ == -1 and low <= exit_tp:
+                    return {"reason": "TARGET", "price": exit_tp}
         if stop > 0 and (dir_ * (price - stop) <= 0):
             return {"reason": "STOP", "price": stop}
-        if tp > 0 and (dir_ * (price - tp) >= 0):
-            return {"reason": "TARGET", "price": tp}
+        if exit_tp > 0 and (dir_ * (price - exit_tp) >= 0):
+            return {"reason": "TARGET", "price": exit_tp}
         return None
 
     def _position_gone(self, state: Dict, pos: Dict, bars: List[Dict], price: float,
                        account: Dict, last: Dict, now_ms: int):
         """내 기록은 있는데 거래소 포지션이 사라졌다 — 청산으로 남긴다."""
-        tp = float(pos.get("tp") or 0.0)
+        tp = float(pos.get("tp_exchange") or pos.get("tp") or 0.0)   # 거래소에 걸어 둔 목표
         stop = float(pos.get("stop") or 0.0)
         dir_ = int(pos.get("dir") or _dir_of(pos.get("side")))
         reason = "OTHER"
@@ -1455,6 +1792,7 @@ class DemoDcaExperiment:
         pos["qty"] = round(new_qty, 8)
         pos["avg"] = avg
         pos["margin"] = round(new_qty * avg / max(1.0, float(pos.get("leverage") or 1)), 4)
+        pos["margin_total"] = pos["margin"]        # 손익률(%)은 이번 평단의 총 증거금으로 잰다
         fresh_liq = _num((ex or {}).get("liqPrice"))
         if fresh_liq:
             pos["liq"] = fresh_liq          # 새 평단의 청산가 — 옛값으로 손절 자리를 재지 않는다
@@ -1468,16 +1806,24 @@ class DemoDcaExperiment:
             note += " · " + " · ".join(notes2)
         return True, note, order
 
-    def _apply_protection(self, pos: Dict, last: Dict, price: Optional[float] = None) -> List[str]:
-        """새 평단에 TP(항상)·SL(4차부터)을 다시 건다. 문제는 문장으로 돌려준다."""
+    def _apply_protection(self, pos: Dict, last: Optional[Dict], price: Optional[float] = None) -> List[str]:
+        """새 평단에 거래소 TP(1차 전이면 2차 목표)·SL(4차 또는 1차 뒤 본절)을 다시 건다."""
         notes: List[str] = []
         spec = self.client.get_instrument(self.cfg.symbol)
         dir_ = int(pos["dir"])
         avg = float(pos["avg"])
         stage = int(pos.get("stage") or 1)
-        tp = tp_price_for(dir_, avg, self.cfg.tp_pct, float(pos["leverage"]), spec.tick_size)
+        targets = self._targets(pos)
+        tp = targets["exchange"]
+        pos["tp"] = targets["next"]
+        pos["tp1"] = targets["tp1"]
+        pos["tp2"] = targets["tp2"]
+        pos["tp_exchange"] = tp
+        pos["be"] = targets["be"]
         sl = None
-        if stage >= LAST_STAGE and self.cfg.sl_mode != "off":
+        if targets["done"] and targets["be"] > 0:
+            sl = _dec(targets["be"])                                   # 1차 익절 뒤 본절 보호
+        elif stage >= LAST_STAGE and self.cfg.sl_mode != "off":
             if self.cfg.sl_mode == "pct":
                 sl = pct_stop_price(dir_, avg, self.cfg.sl_pct, float(pos["leverage"]), spec.tick_size)
             else:
@@ -1508,7 +1854,7 @@ class DemoDcaExperiment:
         except BybitError as exc:
             notes.append(f"TP/SL 설정 실패: {exc}")
             return notes
-        pos["tp"] = float(tp)
+        pos["tp"] = float(targets["next"])          # 화면·감시가 보는 '다음 목표' (거래소 TP와 다를 수 있다)
         if sl is not None:
             pos["stop"] = float(sl)
         return notes
@@ -1610,10 +1956,14 @@ class DemoDcaExperiment:
         state["day"]["entries"] = entries + 1
         notes = self._apply_protection(state["position"], last, price)
         pos = state["position"]
+        target_note = (f"1차 목표 {float(pos.get('tp') or 0):,.2f}"
+                       f"(평단 대비 증거금 +{self.cfg.tp_pct:g}%)")
+        if self.cfg.split_tp:
+            target_note += (f" · 2차 {float(pos.get('tp_exchange') or 0):,.2f}"
+                            f"(+{self.cfg.tp2_pct:g}%)에서 전량")
         events = [f"{ENV_LABELS[self.env]} {'롱' if dir_ == 1 else '숏'} 1차 진입 "
                   f"{pos['qty']:g}개 @ {avg:,.2f} · 증거금 ${pos['margin']:.2f}({self.cfg.first_pct:g}%) · "
-                  f"레버리지 {pos['leverage']:g}배 · 익절 {float(pos['tp']):,.2f} "
-                  f"(평단 대비 증거금 +{self.cfg.tp_pct:g}%) · 주문 {(order or {}).get('orderId')}"]
+                  f"레버리지 {pos['leverage']:g}배 · {target_note} · 주문 {(order or {}).get('orderId')}"]
         reason = (ai_result or {}).get("reason")
         if reason:
             events.append(f"판단({(ai_result or {}).get('mode') or 'ai'}): {reason}")
@@ -1719,13 +2069,16 @@ class DemoDcaExperiment:
             pnl = round(_dir_of(pos.get("side")) * (float(exit_price) - float(pos["avg"]))
                         * float(pos.get("qty") or 0), 4)
             source = source or ("mock" if self.mock else "estimate_price")
+        partial_pnl = _num(pos.get("realized"), 4) if pos.get("realized") else None
+        if pnl is not None and partial_pnl is not None and source not in (None, "exchange"):
+            pnl = round(float(pnl) + float(partial_pnl), 4)      # 1차 부분 익절 몫을 합쳐 거래 손익으로
         dir_ = _dir_of(pos.get("side"))
-        margin = float(pos.get("margin") or 0.0) or (
+        margin = float(pos.get("margin_total") or pos.get("margin") or 0.0) or (
             float(pos.get("qty") or 0) * float(pos.get("avg") or 0) / max(1.0, float(pos.get("leverage") or 1)))
         margin_pct = round(pnl / margin * 100, 1) if (pnl is not None and margin > 0) else None
         reason = reason_hint
-        if reason_hint not in ("TARGET", "STOP", "LIQUIDATION", "TIME"):
-            tp = float(pos.get("tp") or 0.0)
+        if reason_hint not in ("TARGET", "STOP", "LIQUIDATION", "TIME", "BREAKEVEN"):
+            tp = float(pos.get("tp_exchange") or pos.get("tp") or 0.0)
             stop = float(pos.get("stop") or 0.0)
             if tp and exit_price and dir_ * (float(exit_price) - tp) >= 0:
                 reason = "TARGET"
@@ -1734,7 +2087,8 @@ class DemoDcaExperiment:
             else:
                 reason = "OTHER"
         ko = {"TARGET": "익절", "STOP": "손절", "LIQUIDATION": "강제청산",
-              "TIME": "시간 청산", "OTHER": "수동·외부 청산"}.get(reason, reason)
+              "TIME": "시각 청산", "BREAKEVEN": "본절 청산",
+              "OTHER": "수동·외부 청산"}.get(reason, reason)
         trade = {
             "opened_at": pos.get("opened_at"), "closed_at": self.now().isoformat(timespec="seconds"),
             "closed_kst": self.now().astimezone(KST).strftime("%Y-%m-%d %H:%M:%S"),
@@ -1742,6 +2096,9 @@ class DemoDcaExperiment:
             "avg": _num(pos.get("avg")), "exit_price": _num(exit_price), "qty": _num(pos.get("qty"), 8),
             "margin": _num(margin), "pnl": _num(pnl, 4), "pnl_source": source, "margin_pct": margin_pct,
             "reason": reason, "reason_ko": ko,
+            "tp_stage": int(pos.get("tp_stage") or 0), "partial_pnl": partial_pnl,
+            "realized": _num(pos.get("realized"), 4), "be": _num(pos.get("be")),
+            "split_off": pos.get("split_off"),
             "bars_held": self._bars_held(pos, last) if last else None,
             "fills": pos.get("fills") or [], "ai": pos.get("ai") or {},
         }
@@ -1780,8 +2137,10 @@ class DemoDcaExperiment:
         return {"side": pos.get("side"), "stage": int(pos.get("stage") or 1),
                 "qty": _num(pos.get("qty"), 8), "avg": _num(avg),
                 "leverage": lev, "margin": _num(pos.get("margin")),
-                "tp": _num(pos.get("tp")), "stop": _num(pos.get("stop")),
+                "tp": _num(pos.get("tp")), "tp2": _num(pos.get("tp2")), "stop": _num(pos.get("stop")),
                 "liq": _num(pos.get("liq")), "margin_pnl_pct": _num(pct, 1),
+                "tp_stage": int(pos.get("tp_stage") or 0), "be": _num(pos.get("be")),
+                "split_off": pos.get("split_off"), "realized": _num(pos.get("realized")),
                 "opened_at": pos.get("opened_at")}
 
     def _finish(self, state: Dict, last: Dict, action: str, events: List[str], *,
@@ -1824,7 +2183,8 @@ class DemoDcaExperiment:
         """행동은 항상, 대기(WAIT/HOLD)는 10분에 한 번만 남긴다(로그가 하루 3천 줄로 불어나지 않게)."""
         action = record.get("action")
         now = self.now().timestamp()
-        if action in ("OPEN", "ADD", "CLOSE", "SKIP", "ERROR"):
+        if action in ("OPEN", "ADD", "CLOSE", "SKIP", "ERROR", "TP1", "FALLBACK", "BREAKEVEN",
+                      "DELEGATE"):
             self._append_log(record)
             state["last_heartbeat"] = record["ts"]
             self.save_state(state)
@@ -1897,6 +2257,8 @@ def format_live_line(*, now_ms: int, symbol: str, price: Optional[float], state:
             pct = 0.0
         parts.append(f"{side} {int(pos.get('stage') or 1)}차 {pos.get('qty')} @ {avg:,.2f}")
         parts.append(f"증거금 {pct:+.1f}%")
+        if int(pos.get("tp_stage") or 0) >= 1:
+            parts.append("1차 익절 완료")
         next_stage = int(pos.get("stage") or 1) + 1
         rule = None
         for s in (state.get("rules") or {}).get("stages") or []:
@@ -1908,6 +2270,8 @@ def format_live_line(*, now_ms: int, symbol: str, price: Optional[float], state:
             parts.append(f"TP {float(pos['tp']):,.2f}")
         if pos.get("stop"):
             parts.append(f"SL {float(pos['stop']):,.2f}")
+        if not pos.get("stop") and int(pos.get("tp_stage") or 0) == 0 and pos.get("be"):
+            parts.append(f"본절 대기 {float(pos['be']):,.2f}")
     else:
         parts.append("포지션 없음")
     ai_last = state.get("ai_last") or {}
@@ -1930,7 +2294,14 @@ def print_banner(engine: DemoDcaExperiment) -> None:
         print("[demo-dca] 모드: 데모 실주문 — api-demo.bybit.com · 모의 USDT만 움직입니다.", flush=True)
     cfg = engine.cfg
     print(f"[demo-dca] 1차: 가용 잔고 {cfg.first_pct:g}% 증거금 · 레버리지 {cfg.leverage:g}배 · "
-          f"익절 평단 대비 증거금 +{cfg.tp_pct:g}% (가격 {cfg.tp_pct / cfg.leverage:.2f}%)", flush=True)
+          f"1차 익절 평단 대비 증거금 +{cfg.tp_pct:g}% (가격 {cfg.tp_pct / cfg.leverage:.2f}%)", flush=True)
+    if cfg.split_tp:
+        print(f"[demo-dca] 분할 익절: +{cfg.tp_pct:g}%에서 {cfg.tp1_frac * 100:g}% reduce-only 익절 + "
+              f"본절 손절(+{cfg.be_pct:g}%) · 2차 +{cfg.tp2_pct:g}% 전량 · "
+              f"소액 최소수량 미달이면 +{cfg.tp_pct:g}% 전량 폴백", flush=True)
+    else:
+        print(f"[demo-dca] 분할 익절 꺼짐(--no-split-tp) — +{cfg.tp_pct:g}%에서 전량 익절(원본 방식)",
+              flush=True)
     for s in cfg.stages:
         cond = f"RSI{s.rsi_len} 롱<{s.long_below:g}/숏>{s.short_above:g}" if s.cond == "rsi" \
             else f"BB{s.bb_len}/{s.bb_k:g}σ 이탈"
@@ -1941,7 +2312,8 @@ def print_banner(engine: DemoDcaExperiment) -> None:
         if cfg.sl_mode == "auto" else f"4차 뒤 증거금 -{cfg.sl_pct:g}%")
     print(f"[demo-dca] 자동 손절: {sl} · 시간 청산 {cfg.max_hold_bars}봉(5분) · "
           f"하루 {cfg.max_trades_per_day}회 · 일일 손실 {cfg.daily_loss_pct:g}% 킬스위치", flush=True)
-    print(f"[demo-dca] 5분 완성봉 기준 · {cfg.scan_sec}초마다 물타기 선 점검 · 1분마다 상태 한 줄", flush=True)
+    print(f"[demo-dca] 5분 완성봉 기준 · 포지션 없으면 {cfg.scan_sec}초 · 있으면 {cfg.pos_tick_sec}초마다 "
+          f"현재가 확인(시세만) · 1분마다 상태 한 줄", flush=True)
     print(f"[demo-dca] 1차 방향: {cfg.entry_mode} "
           f"({'AI 실패 시 기술 필터' if cfg.entry_mode == 'auto' else cfg.entry_mode}) · "
           f"AI {engine.ai.describe() if hasattr(engine.ai, 'describe') else '준비됨'}", flush=True)
@@ -1969,6 +2341,24 @@ def print_record(rec: Dict) -> None:
           f"자본 {rec.get('equity')} USDT", flush=True)
 
 
+def print_monitor(rec: Dict) -> None:
+    """5초 감시의 결과 중 사람이 볼 만한 것(분할 익절·폴백·본절·청산)만 한 줄로."""
+    when = datetime.fromtimestamp(
+        datetime.fromisoformat(rec["ts"]).timestamp(), tz=KST).strftime("%H:%M:%S")
+    line = f"[demo-dca] {when} KST · 5초 감시 · {rec.get('action')}"
+    if rec.get("price"):
+        line += f" · {float(rec['price']):,.2f}"
+    if rec.get("margin_pnl_pct") is not None:
+        line += f" · 증거금 {float(rec['margin_pnl_pct']):+.1f}%"
+    if rec.get("events"):
+        line += " · " + " | ".join(rec["events"])
+    pos = rec.get("position")
+    if pos:
+        line += (f"  → 보유 {pos['qty']} @ {float(pos['avg']):,.2f}"
+                 f" · TP {pos['tp']} · SL {pos['stop'] if pos.get('stop') else '-'}")
+    print(line, flush=True)
+
+
 def print_status(engine: DemoDcaExperiment) -> None:
     status = engine.status()
     acct = status.get("account") or {}
@@ -1978,6 +2368,13 @@ def print_status(engine: DemoDcaExperiment) -> None:
     print(f"        1차 {rules['firstPct']:g}% · {rules['leverage']:g}배 · 익절 증거금 +{rules['tpPct']:g}% · "
           f"자동 손절 {rules['autoSl']['mode']} · 진입 {('정지(--resume)' if engine.paused() else '허용')}",
           flush=True)
+    split = rules.get("splitTp") or {}
+    if split.get("on"):
+        print(f"        분할 익절 +{split['tp1Pct']:g}%에서 {split['frac'] * 100:g}% reduce-only + 본절 "
+              f"+{split['bePct']:g}% · +{split['tp2Pct']:g}% 전량 · 포지션 {rules.get('posTickSec')}초 감시",
+              flush=True)
+    else:
+        print("        분할 익절 꺼짐 — 1차 목표에서 전량 익절", flush=True)
     if status.get("account_error"):
         print(f"        계좌 조회 실패: {status['account_error']}", flush=True)
     else:
@@ -2020,8 +2417,13 @@ def print_status(engine: DemoDcaExperiment) -> None:
 
 def run_live_loop(engine: DemoDcaExperiment, *, quiet: bool = False,
                   scan_sec: int = DEFAULT_SCAN_SEC, status_sec: int = DEFAULT_STATUS_SEC,
+                  pos_tick_sec: int = DEFAULT_POS_TICK_SEC,
                   max_rounds: Optional[int] = None, clock=None, sleep=None, out=None) -> int:
-    """scan_sec마다 점검하고, 대기 중 status_sec마다 상태 한 줄을 찍는다."""
+    """포지션이 없으면 scan_sec마다 점검, 있으면 pos_tick_sec(기본 5초)마다 시세만 보고 판단한다.
+
+    대기 중 status_sec마다 상태 한 줄. 5초 감시가 "전체 점검"을 요구하면(물타기 차수·강제 정리)
+    바로 tick()을 불러 처리한다. Ctrl+C는 즉시 받는다.
+    """
     out = out or (lambda line: print(line, flush=True))
     clock = clock or (lambda: int(engine.now().timestamp() * 1000))
     sleep = sleep or time.sleep
@@ -2029,19 +2431,38 @@ def run_live_loop(engine: DemoDcaExperiment, *, quiet: bool = False,
     next_status = clock() + max(1, int(status_sec)) * 1000
     try:
         while True:
-            rec = None
             try:
-                rec = engine.tick()
+                state = engine.load_state()
+            except Exception:
+                state = {}
+            has_pos = bool(state.get("position"))
+            rec = None
+            mon = None
+            try:
+                if has_pos:
+                    mon = engine.monitor_position()
+                    if mon.get("delegate"):
+                        rec = engine.tick()
+                else:
+                    rec = engine.tick()
             except Exception as exc:
                 if not quiet:
                     out(f"[demo-dca] 점검 실패: {exc} — {RETRY_SEC}초 뒤 다시")
             rounds += 1
-            if rec is not None and not quiet:
-                if rec.get("action") not in ("WAIT", "HOLD"):
+            if not quiet:
+                if rec is not None and rec.get("action") not in ("WAIT", "HOLD"):
                     print_record(rec)
+                elif mon is not None and mon.get("action") in ("TP1", "FALLBACK", "CLOSE",
+                                                               "BREAKEVEN"):
+                    print_monitor(mon)
             if max_rounds is not None and rounds >= int(max_rounds):
                 return 0
-            due = clock() + max(5, int(scan_sec)) * 1000
+            try:
+                state = engine.load_state()
+            except Exception:
+                state = {}
+            interval = max(1, int(pos_tick_sec)) if state.get("position") else max(5, int(scan_sec))
+            due = clock() + interval * 1000
             while True:
                 now = clock()
                 if now >= due:
@@ -2050,7 +2471,6 @@ def run_live_loop(engine: DemoDcaExperiment, *, quiet: bool = False,
                 now = clock()
                 if quiet or now < next_status:
                     continue
-                state = engine.load_state()
                 out(format_live_line(now_ms=now, symbol=engine.cfg.symbol,
                                      price=engine._last_price, state=state,
                                      due_ms=next_bar_close_ms(now, engine.tf_ms),
@@ -2077,7 +2497,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--first-pct", type=float, default=None,
                     help="1차 증거금 비중 %%(기본 13, env DCA_FIRST_PCT)")
     ap.add_argument("--tp-pct", type=float, default=None,
-                    help="익절 증거금 %% (기본 10, env DCA_TP_PCT)")
+                    help="1차 익절 증거금 %% (기본 10, env DCA_TP_PCT)")
+    ap.add_argument("--split-tp", dest="split_tp", action="store_true", default=None,
+                    help="2단계 분할 익절 + 본절 보호(기본 켜짐)")
+    ap.add_argument("--no-split-tp", dest="split_tp", action="store_false",
+                    help="분할 없이 +tp-pct에서 전량 익절(원본 방식)")
+    ap.add_argument("--tp2-pct", type=float, default=None,
+                    help="2차 익절 증거금 %% (기본 20, env DCA_TP2_PCT)")
+    ap.add_argument("--tp1-frac", type=float, default=None,
+                    help="1차에서 줄이는 비율 (기본 0.5)")
+    ap.add_argument("--be-pct", type=float, default=None,
+                    help="1차 뒤 본절 손절 = 평단 + 증거금 %% (기본 1.5)")
+    ap.add_argument("--pos-tick-sec", type=int, default=None,
+                    help="포지션 보유 중 현재가 확인 간격(초, 기본 5)")
     ap.add_argument("--cap-pct", type=float, default=100.0, help="운용 상한(가용 잔고 %%, 기본 100)")
     ap.add_argument("--entry-mode", default="auto", choices=["auto", "ai", "tech"],
                     help="1차 방향: auto(AI→기술)·ai·tech")
@@ -2126,11 +2558,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(f"[demo-dca] {env_name} 값을 읽을 수 없습니다: {raw!r} — 기본값 {default}을 씁니다", flush=True)
             return default
 
+    def flag(value_arg, env_name, default: bool) -> bool:
+        """켜고 끄는 스위치 — --flag/--no-flag > env > 기본값."""
+        if value_arg is not None:
+            return bool(value_arg)
+        return _env_flag(env_name, default)
+
     cfg = DCAConfig(
         symbol=str(pick(args.symbol, "DCA_SYMBOL", "ETHUSDT")).upper(),
         leverage=pick(args.leverage, "DCA_LEVERAGE", DEFAULT_LEV),
         first_pct=pick(args.first_pct, "DCA_FIRST_PCT", 13.0),
         tp_pct=pick(args.tp_pct, "DCA_TP_PCT", 10.0),
+        split_tp=flag(args.split_tp, "DCA_SPLIT_TP", True),
+        tp2_pct=pick(args.tp2_pct, "DCA_TP2_PCT", DEFAULT_TP2_PCT),
+        tp1_frac=pick(args.tp1_frac, "DCA_TP1_FRAC", DEFAULT_TP1_FRAC),
+        be_pct=pick(args.be_pct, "DCA_BE_PCT", DEFAULT_BE_PCT),
+        pos_tick_sec=max(1, int(pick(args.pos_tick_sec, "DCA_POS_TICK_SEC", DEFAULT_POS_TICK_SEC))),
         cap_pct=args.cap_pct, source=args.source,
         entry_mode=args.entry_mode, force_entry=args.force_entry,
         reserve_lev_pct=args.reserve_lev_pct, sl_mode=args.sl_mode, sl_pct=args.sl_pct,
@@ -2220,10 +2663,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if args.loop:
         if not args.quiet:
-            print(f"[demo-dca] {cfg.symbol} 5분봉 · {cfg.scan_sec}초마다 물타기 선 점검 · "
-                  f"{cfg.status_sec}초마다 상태 한 줄 · 상태 {engine.state_path}", flush=True)
+            print(f"[demo-dca] {cfg.symbol} 5분봉 · 포지션 없으면 {cfg.scan_sec}초 · 있으면 "
+                  f"{cfg.pos_tick_sec}초 감시 · {cfg.status_sec}초마다 상태 한 줄 · 상태 {engine.state_path}",
+                  flush=True)
         return run_live_loop(engine, quiet=args.quiet, scan_sec=cfg.scan_sec,
-                             status_sec=cfg.status_sec)
+                             status_sec=cfg.status_sec, pos_tick_sec=cfg.pos_tick_sec)
     return once()
 
 

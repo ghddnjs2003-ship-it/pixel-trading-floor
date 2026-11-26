@@ -21,7 +21,8 @@ from contextlib import redirect_stdout
 from pathlib import Path
 
 from backend.ai_filter import FilterConfig
-from backend.bybit_client import DEMO_BASE_URL, TESTNET_BASE_URL, BybitClient, BybitConfigError
+from backend.bybit_client import (DEMO_BASE_URL, TESTNET_BASE_URL, BybitClient, BybitConfigError,
+                                  BybitError)
 from backend.testnet_auto import (AutoConfig, RunLock, TestnetAuto, build_client, format_live_line,
                                   main, nearest_level, next_bar_close_ms, next_scan_ms, print_banner,
                                   run_live_loop, run_smoke_test, swing_levels, volatility_spike)
@@ -1088,6 +1089,270 @@ class LiveTickerTests(TestnetAutoTestBase):
         os.environ["BYBIT_ADAPTIVE"] = "true"
         self.assertTrue(run("env", []))
         self.assertFalse(run("env_off", ["--no-adaptive"]))
+
+
+class PositionMonitorTests(TestnetAutoTestBase):
+    """5초 포지션 감시 — +1.5R 절반 익절·본절 이동·소액 폴백(물타기 없음·안전선 그대로)."""
+
+    def seeded(self, qty=0.004, entry=PRICE, stop=PRICE - 900, **over):
+        engine = self.engine(ai=FakeAI())
+        pos = {"side": "Buy", "qty": str(qty), "entry": float(entry),
+               "stop": float(stop), "stop0": float(stop), "target": float(entry) + 3600,
+               "leverage": 3.0, "risk_usd": abs(float(entry) - float(stop)) * float(qty),
+               "risk_per_unit": abs(float(entry) - float(stop)), "order_id": "seed-1",
+               "signal_time": self.candles[-1]["t"], "entry_bar_time": self.candles[-1]["t"],
+               "entry_time": "2026-09-19T00:00:00+00:00", "ai": {"decision": "PASS"},
+               "tp1_done": False, "be": None, "partial": None, "realized": 0.0, **over}
+        state = engine.load_state()
+        state["position"] = pos
+        engine.save_state(state)
+        engine.client._mock_positions["BTCUSDT"] = {
+            "symbol": "BTCUSDT", "side": "Buy", "size": float(qty), "entryPrice": float(entry),
+            "stopLoss": float(stop), "takeProfit": float(entry) + 3600, "leverage": 3.0,
+            "unrealisedPnl": 0.0}
+        return engine, pos
+
+    def test_defaults_are_five_seconds_and_one_and_a_half_r(self):
+        engine = self.engine(ai=False)
+        self.assertEqual(engine.cfg.pos_tick_sec, 5)
+        self.assertTrue(engine.cfg.partial_tp)
+        self.assertAlmostEqual(engine.cfg.be_trigger_r, 1.5)
+        self.assertAlmostEqual(engine.cfg.be_buffer_pct, 0.1)
+
+    def test_first_target_takes_half_and_moves_stop_to_breakeven(self):
+        engine, _pos = self.seeded(qty=0.004)
+        rec = engine.monitor_position(price=PRICE + 1350)          # 1.5R
+        self.assertEqual(rec["action"], "PARTIAL", rec["events"])
+        self.assertAlmostEqual(rec["r"], 1.5, places=2)
+        state = json.loads(Path(engine.state_path).read_text(encoding="utf-8"))
+        pos = state["position"]
+        self.assertTrue(pos["tp1_done"])
+        self.assertAlmostEqual(float(pos["qty"]), 0.002)            # 절반만 남음
+        self.assertAlmostEqual(pos["realized"], 2.7, places=2)      # 0.002 × 1350
+        self.assertGreater(pos["stop"], PRICE)                       # 본절 위
+        self.assertAlmostEqual(pos["stop"], 60060.0, places=2)       # 진입 +0.1%
+        ex = engine.client._mock_positions["BTCUSDT"]
+        self.assertAlmostEqual(ex["size"], 0.002)
+        self.assertAlmostEqual(ex["stopLoss"], 60060.0, places=2)
+        self.assertAlmostEqual(ex["takeProfit"], 63600.0, places=2)  # 4R 목표는 그대로
+        self.assertEqual(rec["position"]["tp1_done"], True)
+
+    def test_only_half_is_closed_once(self):
+        engine, _pos = self.seeded(qty=0.004)
+        engine.monitor_position(price=PRICE + 1350)
+        second = engine.monitor_position(price=PRICE + 1500)
+        self.assertNotEqual(second["action"], "PARTIAL")
+        state = json.loads(Path(engine.state_path).read_text(encoding="utf-8"))
+        self.assertAlmostEqual(float(state["position"]["qty"]), 0.002)
+
+    def test_small_position_skips_partial_but_still_moves_breakeven(self):
+        engine, _pos = self.seeded(qty=0.001)                     # BTC 최소 수량 → 절반 불가
+        rec = engine.monitor_position(price=PRICE + 1350)
+        self.assertEqual(rec["action"], "BREAKEVEN", rec["events"])
+        self.assertIn("분할 익절 건너뜀", " ".join(rec["events"]))
+        self.assertIn("최소 주문 수량", " ".join(rec["events"]))
+        state = json.loads(Path(engine.state_path).read_text(encoding="utf-8"))
+        pos = state["position"]
+        self.assertAlmostEqual(float(pos["qty"]), 0.001)            # 수량 그대로
+        self.assertTrue(pos["tp1_done"])
+        self.assertAlmostEqual(pos["stop"], 60060.0, places=2)        # 본절은 옮겼다
+        self.assertIsNone(pos.get("partial"))
+        self.assertAlmostEqual(engine.client._mock_positions["BTCUSDT"]["stopLoss"], 60060.0, places=2)
+
+    def test_monitor_does_not_call_ai_or_touch_entry_rules(self):
+        ai = FakeAI()
+        engine, _pos = self.seeded(qty=0.004)
+        engine.ai = ai
+        engine.monitor_position(price=PRICE + 300)
+        engine.monitor_position(price=PRICE + 600)
+        self.assertEqual(ai.calls, 0)                                # 5초 감시는 AI를 부르지 않는다
+        state = json.loads(Path(engine.state_path).read_text(encoding="utf-8"))
+        self.assertEqual(state["position"]["target"], PRICE + 3600) # 4R 목표 그대로
+        self.assertEqual(state["position"]["stop0"], PRICE - 900)   # 원래 3ATR 손절 기록 유지
+
+    def test_partial_then_four_r_target_counts_both_legs(self):
+        lifted = flat_candles(120, price=PRICE + 400)          # 진입 뒤 봉들 — 본절 위에서만 움직임
+        engine, _pos = self.seeded(qty=0.004, entry_bar_time=lifted[-1]["t"])
+        engine.monitor_position(price=PRICE + 1350)
+        bar = {"t": lifted[-1]["t"] + TF, "o": PRICE + 3600, "h": PRICE + 3700,
+               "l": PRICE + 1000, "c": PRICE + 3600, "v": 5.0}
+        rec = engine.tick(candles=lifted + [bar], now_ms=bar["t"] + TF + 60_000, signals=[])
+        self.assertEqual(rec["action"], "CLOSE", rec["events"])
+        trade = json.loads(Path(engine.state_path).read_text(encoding="utf-8"))["closed"][-1]
+        self.assertEqual(trade["reason"], "TARGET")
+        self.assertAlmostEqual(trade["partial_pnl"], 2.7, places=2)
+        self.assertAlmostEqual(trade["pnl"], 9.9, places=2)          # 2.7 + 0.002×3600
+        self.assertAlmostEqual(trade["r"], 2.75, places=2)           # ½×1.5R + ½×4R
+
+    def test_no_partial_flag_keeps_the_old_behaviour(self):
+        engine = self.engine(ai=FakeAI(), cfg=AutoConfig(data_dir=self.dir, partial_tp=False))
+        state = engine.load_state()
+        state["position"] = {"side": "Buy", "qty": "0.004", "entry": PRICE,
+                             "stop": PRICE - 900, "stop0": PRICE - 900, "target": PRICE + 3600,
+                             "leverage": 3.0, "risk_usd": 3.6, "risk_per_unit": 900.0,
+                             "tp1_done": False, "realized": 0.0}
+        engine.save_state(state)
+        engine.client._mock_positions["BTCUSDT"] = {
+            "symbol": "BTCUSDT", "side": "Buy", "size": 0.004, "entryPrice": PRICE,
+            "stopLoss": PRICE - 900, "takeProfit": PRICE + 3600, "leverage": 3.0}
+        rec = engine.monitor_position(price=PRICE + 1350)
+        self.assertEqual(rec["action"], "WAIT")
+        state = json.loads(Path(engine.state_path).read_text(encoding="utf-8"))
+        self.assertFalse(state["position"]["tp1_done"])
+        self.assertAlmostEqual(float(state["position"]["qty"]), 0.004)
+        self.assertAlmostEqual(state["position"]["stop"], PRICE - 900)
+
+    def test_breakeven_exit_is_named_and_keeps_the_gain(self):
+        lifted = flat_candles(120, price=PRICE + 400)
+        engine, _pos = self.seeded(qty=0.004, entry_bar_time=lifted[-1]["t"])
+        engine.monitor_position(price=PRICE + 1350)
+        bar = {"t": lifted[-1]["t"] + TF, "o": PRICE + 200, "h": PRICE + 260,
+               "l": 60_000.0, "c": 60_010.0, "v": 5.0}
+        rec = engine.tick(candles=lifted + [bar], now_ms=bar["t"] + TF + 60_000, signals=[])
+        self.assertEqual(rec["action"], "CLOSE", rec["events"])
+        trade = json.loads(Path(engine.state_path).read_text(encoding="utf-8"))["closed"][-1]
+        self.assertEqual(trade["reason"], "BREAKEVEN")
+        self.assertAlmostEqual(trade["pnl"], 2.82, places=2)         # 본절 +0.12 + 1차 익절 2.7
+        self.assertGreater(trade["pnl"], 0)                          # 원금 손실 없이 마감
+
+    def test_live_partial_sends_reduce_only_and_breakeven_stop(self):
+        pos_before = {"retCode": 0, "result": {"list": [{
+            "symbol": "BTCUSDT", "side": "Buy", "size": "0.004", "avgPrice": "60000",
+            "stopLoss": "59100", "takeProfit": "63600", "leverage": "3",
+            "unrealisedPnl": ""}]}}
+        pos_after = {"retCode": 0, "result": {"list": [{
+            "symbol": "BTCUSDT", "side": "Buy", "size": "0.002", "avgPrice": "60000",
+            "stopLoss": "60060", "takeProfit": "63600", "leverage": "3",
+            "unrealisedPnl": ""}]}}
+        transport = SequenceTransport({
+            "/v5/market/tickers": [{"retCode": 0, "result": {"list": [{"lastPrice": "61350"}]}}],
+            "/v5/market/instruments-info": [INSTRUMENTS],
+            "/v5/order/create": [{"retCode": 0, "result": {"orderId": "live-partial"}}],
+            "/v5/position/list": [pos_before, pos_after],
+            "/v5/position/trading-stop": [{"retCode": 0, "result": {}}],
+        })
+        client = BybitClient(api_key="k", api_secret="s", transport=transport)
+        engine, _pos = self.seeded(qty=0.004)
+        engine.client = client
+        rec = engine.monitor_position()
+        self.assertEqual(rec["action"], "PARTIAL", rec["events"])
+        order = [c for c in transport.calls if c["path"] == "/v5/order/create"][0]["body"]
+        self.assertEqual(order["reduceOnly"], True)
+        self.assertEqual(order["side"], "Sell")
+        self.assertEqual(order["qty"], "0.002")
+        self.assertEqual(order["orderType"], "Market")
+        stop = [c for c in transport.calls if c["path"] == "/v5/position/trading-stop"][0]["body"]
+        self.assertEqual(stop["stopLoss"], "60060")       # 진입 +0.1% 본절
+        self.assertNotIn("takeProfit", stop)               # 4R 목표는 건드리지 않는다
+        state = json.loads(Path(engine.state_path).read_text(encoding="utf-8"))
+        self.assertAlmostEqual(float(state["position"]["qty"]), 0.002)
+        self.assertTrue(state["position"]["tp1_done"])
+
+    def test_failed_breakeven_retries_without_a_second_partial(self):
+        engine, _pos = self.seeded(qty=0.004)
+        calls = {"n": 0}
+        original = engine.client.set_trading_stop
+
+        def flaky(symbol, take_profit=None, stop_loss=None):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise BybitError("일시 오류(시험)")
+            return original(symbol, take_profit=take_profit, stop_loss=stop_loss)
+
+        engine.client.set_trading_stop = flaky
+        first = engine.monitor_position(price=PRICE + 1350)
+        self.assertEqual(first["action"], "PARTIAL", first["events"])
+        state = json.loads(Path(engine.state_path).read_text(encoding="utf-8"))
+        self.assertAlmostEqual(float(state["position"]["qty"]), 0.002)
+        self.assertFalse(state["position"]["tp1_done"])          # 본절은 아직 못 옮김
+        second = engine.monitor_position(price=PRICE + 1360)
+        self.assertEqual(second["action"], "PARTIAL", second["events"])
+        state = json.loads(Path(engine.state_path).read_text(encoding="utf-8"))
+        self.assertAlmostEqual(float(state["position"]["qty"]), 0.002)   # 또 줄이지 않는다
+        self.assertTrue(state["position"]["tp1_done"])           # 본절은 다시 시도해 성공
+        self.assertAlmostEqual(state["position"]["stop"], 60060.0, places=2)
+
+    def test_cli_pos_tick_and_partial_flags(self):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            code = main(["--status", "--mock", "--pos-tick-sec", "7", "--no-partial-tp",
+                         "--state", os.path.join(self.dir, "s.json"),
+                         "--log", os.path.join(self.dir, "l.jsonl"),
+                         "--killswitch", os.path.join(self.dir, "k.json")])
+        self.assertEqual(code, 0)
+        self.assertIn("본절 이동 꺼짐", buf.getvalue())
+
+
+class MonitorLoopTests(TestnetAutoTestBase):
+    """루프가 포지션 보유 중에 현재가를 5초마다 보는지(대기 주기와 별개로)."""
+
+    class Stub:
+        def __init__(self, position=True, pos_tick_sec=5):
+            self.cfg = AutoConfig(data_dir=tempfile.mkdtemp(), pos_tick_sec=pos_tick_sec)
+            self.state = {"position": ({"side": "Buy", "qty": "0.004", "entry": PRICE,
+                                        "stop": PRICE - 900, "target": PRICE + 3600}
+                                       if position else None)}
+
+        @property
+        def interval_min(self):
+            return 30
+
+        def tick(self):
+            return {"ts": "x", "bar_kst": "x", "action": "HOLD", "price": PRICE, "events": [],
+                    "position": self.state.get("position"), "equity": 50.0,
+                    "watch": {"adaptive": False, "mode": "normal", "interval_min": 30,
+                              "reasons": []},
+                    "stats": {"trades": 0, "win_rate_pct": None, "net_pnl": 0.0, "avg_r": None}}
+
+        def monitor_position(self):
+            return {"ts": "2026-09-19T02:02:00+00:00", "action": "WAIT", "price": PRICE,
+                    "r": 0.2, "events": [], "position": self.state.get("position")}
+
+        def quote(self):
+            return {"price": PRICE, "source": "ticker"}
+
+        def load_state(self):
+            return dict(self.state)
+
+    def test_position_is_checked_every_five_seconds(self):
+        engine = self.Stub(position=True)
+        clock = FakeClock(START)
+        stamps = []
+        original = engine.monitor_position
+
+        def mon():
+            stamps.append(clock.ms)
+            return original()
+
+        engine.monitor_position = mon
+        run_live_loop(engine, clock=clock.now, sleep=clock.sleep, out=lambda _l: None,
+                      max_rounds=2)
+        self.assertGreaterEqual(len(stamps), 2)
+        self.assertEqual(stamps[1] - stamps[0], 5_000)               # 30분/5분이 아니라 5초
+
+    def test_pos_tick_sec_is_configurable(self):
+        engine = self.Stub(position=True, pos_tick_sec=9)
+        clock = FakeClock(START)
+        stamps = []
+
+        def mon():
+            stamps.append(clock.ms)
+            return {"ts": "2026-09-19T02:02:00+00:00", "action": "WAIT", "price": PRICE,
+                    "r": 0.1, "events": [], "position": engine.state.get("position")}
+
+        engine.monitor_position = mon
+        run_live_loop(engine, clock=clock.now, sleep=clock.sleep, out=lambda _l: None,
+                      max_rounds=2)
+        self.assertEqual(stamps[1] - stamps[0], 9_000)
+
+    def test_without_position_there_is_no_price_watch(self):
+        engine = self.Stub(position=False)
+        clock = FakeClock(START)
+        calls = []
+        engine.monitor_position = lambda: calls.append(1) or {"action": "IDLE"}
+        run_live_loop(engine, clock=clock.now, sleep=clock.sleep, out=lambda _l: None,
+                      max_rounds=1)
+        self.assertEqual(calls, [])
 
 
 class SequenceTransport:

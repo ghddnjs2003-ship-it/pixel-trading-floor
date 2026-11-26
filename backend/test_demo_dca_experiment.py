@@ -20,15 +20,16 @@ from decimal import Decimal
 from io import StringIO
 from pathlib import Path
 
-from backend.bybit_client import DEMO_BASE_URL, BybitClient, BybitConfigError, OrderRejected
+from backend.bybit_client import (DEMO_BASE_URL, BybitClient, BybitConfigError, Instrument,
+                                  OrderRejected)
 from backend.demo_dca_experiment import (BAR_TF_MS, DcaBybitClient, DCAConfig,
                                          DemoDcaExperiment, adverse_pct, auto_sl_trigger,
-                                         bollinger, closed_bars, cond_met, dca_decision,
-                                         format_live_line, liq_of, main, margin_amount,
-                                         next_bar_close_ms, other_engine_locks,
+                                         bollinger, breakeven_stop_price, closed_bars, cond_met,
+                                         dca_decision, format_live_line, liq_of, main,
+                                         margin_amount, next_bar_close_ms, other_engine_locks,
                                          pct_stop_price, print_banner, qty_for, rsi_wilder,
-                                         stage_margin_pct, stage_rule, tech_direction,
-                                         tp_price_for, validate_settings)
+                                         run_live_loop, split_qty, stage_margin_pct, stage_rule,
+                                         tech_direction, tp_price_for, validate_settings)
 
 TF = BAR_TF_MS
 START = (1_790_000_000_000 // TF) * TF
@@ -532,7 +533,7 @@ class TestDcaStages(Base):
 
 class TestClose(Base):
     def test_take_profit_closes_and_records(self):
-        eng = self.engine()
+        eng = self.engine(self.cfg(split_tp=False))          # 원본 방식: +10% 전량 익절
         candles = flat(120, 2000.0)
         self.assertEqual(self.tick(eng, candles)["action"], "OPEN")
         candles = candles + bars([2004.0], start=START + 120 * TF)
@@ -547,6 +548,34 @@ class TestClose(Base):
         self.assertEqual(state["stats"]["targets"], 1)
         self.assertEqual(eng.killswitch.state["trades"], 1)
         self.assertEqual(eng.killswitch.state["realized_pnl"], 0.64)
+
+    def test_split_take_profit_then_second_target(self):
+        """기본값(분할 켜짐): +10%에서 절반만 익절하고 본절로 올린 뒤, +20%에서 나머지를 닫는다."""
+        eng = self.engine()
+        candles = flat(120, 2000.0)
+        first = self.tick(eng, candles)
+        self.assertEqual(first["action"], "OPEN", first["events"])
+        self.assertEqual(first["position"]["tp"], 2004.0)        # 다음 목표 = 1차(+10%)
+        candles = candles + bars([2004.0], start=START + 120 * TF)
+        rec = self.tick(eng, candles)
+        self.assertEqual(rec["action"], "TP1", rec["events"])
+        pos = eng.load_state()["position"]
+        self.assertAlmostEqual(pos["qty"], 0.08)                 # 절반만 남음
+        self.assertEqual(pos["tp_stage"], 1)
+        self.assertAlmostEqual(pos["realized"], 0.32, places=2)   # 0.08 × 4.0
+        self.assertGreater(pos["stop"], 2000.0)                   # 본절 위
+        self.assertLess(pos["stop"], 2004.0)
+        self.assertAlmostEqual(pos["tp"], 2008.0)                 # 다음 목표 = 2차(+20%)
+        self.assertAlmostEqual(pos["tp2"], 2008.0)
+        candles = candles + bars([2008.0], start=START + 121 * TF)
+        rec2 = self.tick(eng, candles)
+        self.assertEqual(rec2["action"], "CLOSE", rec2["events"])
+        trade = eng.load_state()["closed"][-1]
+        self.assertEqual(trade["reason"], "TARGET")
+        self.assertEqual(trade["tp_stage"], 1)
+        self.assertAlmostEqual(trade["partial_pnl"], 0.32, places=2)
+        self.assertAlmostEqual(trade["pnl"], 0.96, places=2)      # 0.32(1차) + 0.64(2차)
+        self.assertAlmostEqual(trade["margin_pct"], 15.0, places=0)
 
     def test_stop_after_stage4_records_loss(self):
         eng = self.engine()
@@ -574,7 +603,7 @@ class TestClose(Base):
         self.assertEqual(eng.load_state()["closed"][-1]["reason"], "TIME")
 
     def test_no_reentry_on_same_bar_after_close(self):
-        eng = self.engine()
+        eng = self.engine(self.cfg(split_tp=False))
         candles = flat(120, 2000.0)
         self.tick(eng, candles)
         candles = candles + bars([2004.0], start=START + 120 * TF)
@@ -583,7 +612,7 @@ class TestClose(Base):
         self.assertNotEqual(again["action"], "OPEN")
 
     def test_daily_trade_cap_blocks_next_cycle(self):
-        eng = self.engine(self.cfg(max_trades_per_day=1))
+        eng = self.engine(self.cfg(max_trades_per_day=1, split_tp=False))
         candles = flat(120, 2000.0)
         self.tick(eng, candles)
         candles = candles + bars([2004.0], start=START + 120 * TF)
@@ -593,6 +622,323 @@ class TestClose(Base):
         self.assertEqual(rec["action"], "SKIP")
         self.assertTrue("하루 최대" in " ".join(rec["events"])
                         or "당일 거래" in " ".join(rec["events"]), rec["events"])
+
+
+class TestSplitHelpers(Base):
+    """분할 익절 수량·본절 손절가 — 소액 폴백이 숫자로 동작하는지."""
+
+    def eth(self):
+        return DcaBybitClient.get_instrument(
+            DcaBybitClient(api_key="", api_secret="", env="demo"), "ETHUSDT")
+
+    def test_split_half_of_eth_passes(self):
+        part, why = split_qty(0.16, self.eth(), 0.5, 2004.0)
+        self.assertIsNone(why)
+        self.assertEqual(part, Decimal("0.08"))
+
+    def test_split_below_min_qty_falls_back(self):
+        # BTC 0.001개의 절반은 0.000 → 최소 주문 수량 미달
+        part, why = split_qty(0.001, DcaBybitClient.get_instrument(
+            DcaBybitClient(api_key="", api_secret="", env="demo"), "BTCUSDT"), 0.5, 60_000.0)
+        self.assertEqual(part, Decimal("0"))
+        self.assertIn("최소 주문 수량", why)
+
+    def test_split_remaining_below_min_qty_falls_back(self):
+        spec = Instrument("XUSDT", Decimal("0.006"), Decimal("0.001"), Decimal("0.01"))
+        part, why = split_qty(0.01, spec, 0.8)          # 0.008 남고 0.002 남는다 → 잔여 미달
+        self.assertEqual(part, Decimal("0"))
+        self.assertIn("남는 수량", why)
+
+    def test_split_below_min_notional_falls_back(self):
+        spec = Instrument("XUSDT", Decimal("0.01"), Decimal("0.01"), Decimal("0.01"),
+                          None, Decimal("1000"))
+        part, why = split_qty(0.16, spec, 0.5, 2000.0)   # 0.08 × 2000 = $160 < $1000
+        self.assertEqual(part, Decimal("0"))
+        self.assertIn("최소 주문 금액", why)
+
+    def test_breakeven_stop_is_profit_side_of_average(self):
+        tick = Decimal("0.01")
+        be = breakeven_stop_price(1, 2000.0, 1.5, 50.0, tick)     # 증거금 +1.5% = 가격 +0.03%
+        self.assertGreater(float(be), 2000.0)
+        self.assertLess(float(be), 2004.0)
+        self.assertEqual(be, Decimal("2000.60"))
+        be_short = breakeven_stop_price(-1, 2000.0, 1.5, 50.0, tick)
+        self.assertLess(float(be_short), 2000.0)
+        self.assertEqual(be_short, Decimal("1999.40"))
+        # 호가 단위가 커도 진입가에 붙지 않는다(거래소가 손절가=진입가를 거부한다)
+        coarse = breakeven_stop_price(1, 2000.0, 1.5, 50.0, Decimal("1"))
+        self.assertEqual(coarse, Decimal("2001"))
+
+
+class TestPositionMonitor(Base):
+    """포지션 5초 감시 — 시세만으로 1차 분할·본절·2차 목표를 즉시 처리하는지."""
+
+    class Transport:
+        """실제 네트워크 대신 정해진 응답을 돌려주고 보낸 요청을 남긴다(실주문 경로 시험)."""
+
+        def __init__(self, responses):
+            self.responses = responses
+            self.calls = []
+
+        def __call__(self, method, path, params, body, headers):
+            self.calls.append({"method": method, "path": path, "params": dict(params),
+                               "body": body})
+            if path not in self.responses:
+                raise AssertionError(f"예상하지 못한 요청: {method} {path}")
+            return json.loads(json.dumps(self.responses[path]))
+
+
+    def seed(self, eng, *, symbol="ETHUSDT", side="Buy", qty=0.16, avg=2000.0, lev=50.0,
+             price=2000.0, **over):
+        """포지션이 열린 상태를 만든다(내 기록 + mock 거래소 장부)."""
+        eng.client.set_mock_price(symbol, price)
+        eng.client._mock_positions[symbol] = {
+            "symbol": symbol, "side": side, "size": float(qty), "entryPrice": float(avg),
+            "stopLoss": 0.0, "takeProfit": 0.0, "leverage": float(lev), "unrealisedPnl": 0.0}
+        state = eng.load_state()
+        state["position"] = {
+            "side": side, "dir": 1 if side == "Buy" else -1, "stage": 1,
+            "qty": float(qty), "avg": float(avg), "leverage": float(lev),
+            "margin": round(float(qty) * float(avg) / float(lev), 4), "capital": 50.0,
+            "tp": None, "stop": None, "liq": None, "entry_bar": START,
+            "last_fill_bar": START, "opened_at": "2026-09-19T00:00:00+00:00",
+            "fills": [], "ai": {}, **over}
+        eng.save_state(state)
+        return state["position"]
+
+    def test_no_position_does_nothing(self):
+        eng = self.engine()
+        rec = eng.monitor_position(price=2004.0)
+        self.assertEqual(rec["action"], "IDLE")
+        self.assertIn("포지션 없음", rec["events"][0])
+        self.assertFalse(rec["delegate"])
+
+    def test_first_target_splits_half_and_moves_stop_to_breakeven(self):
+        eng = self.engine()
+        self.seed(eng)
+        rec = eng.monitor_position(price=2004.0)          # 50배 → 증거금 +10%
+        self.assertEqual(rec["action"], "TP1", rec["events"])
+        pos = eng.load_state()["position"]
+        self.assertAlmostEqual(pos["qty"], 0.08)
+        self.assertEqual(pos["tp_stage"], 1)
+        self.assertAlmostEqual(pos["realized"], 0.32, places=2)
+        self.assertGreater(pos["stop"], 2000.0)            # 본절 위
+        self.assertAlmostEqual(pos["be"], 2000.6, places=2)
+        self.assertAlmostEqual(pos["tp"], 2008.0)          # 다음 목표 = 2차
+        ex = eng.client.get_position("ETHUSDT")           # 거래소에도 반영
+        self.assertAlmostEqual(ex["size"], 0.08)
+        self.assertAlmostEqual(ex["stopLoss"], float(pos["stop"]), places=2)
+        self.assertAlmostEqual(ex["takeProfit"], 2008.0, places=2)
+        self.assertIn("1차 분할 익절", " ".join(rec["events"]))
+
+    def test_second_target_closes_the_rest(self):
+        eng = self.engine()
+        self.seed(eng)
+        eng.monitor_position(price=2004.0)
+        rec = eng.monitor_position(price=2008.0)
+        self.assertEqual(rec["action"], "CLOSE", rec["events"])
+        state = eng.load_state()
+        self.assertIsNone(state["position"])
+        trade = state["closed"][-1]
+        self.assertEqual(trade["reason"], "TARGET")
+        self.assertAlmostEqual(trade["pnl"], 0.96, places=2)     # 0.32 + 0.64
+        self.assertEqual(trade["tp_stage"], 1)
+
+    def test_price_back_to_breakeven_closes_without_loss(self):
+        eng = self.engine()
+        self.seed(eng)
+        eng.monitor_position(price=2004.0)
+        rec = eng.monitor_position(price=2000.0)          # 본절 아래로
+        self.assertEqual(rec["action"], "CLOSE", rec["events"])
+        trade = eng.load_state()["closed"][-1]
+        self.assertEqual(trade["reason"], "BREAKEVEN")
+        self.assertGreater(trade["pnl"], 0)              # 원금 손실 없이 마감
+        self.assertLess(trade["pnl"], 0.96)
+
+    def test_small_position_skips_split_and_takes_full_target(self):
+        eng = self.engine(self.cfg(symbol="BTCUSDT", force_entry="long"))
+        self.seed(eng, symbol="BTCUSDT", qty=0.001, avg=60_000.0, price=60_000.0)
+        rec = eng.monitor_position(price=60_120.0)        # 50배 → 증거금 +10%
+        self.assertEqual(rec["action"], "FALLBACK", rec["events"])
+        self.assertIn("분할 익절 건너뜀", " ".join(rec["events"]))
+        self.assertIn("전량 익절", " ".join(rec["events"]))
+        state = eng.load_state()
+        self.assertIsNone(state["position"])              # 폴백 — 목표에서 전량 청산
+        self.assertEqual(state["closed"][-1]["reason"], "TARGET")
+
+    def test_live_partial_tp_sends_reduce_only_and_breakeven_stop(self):
+        transport = self.Transport({
+            "/v5/market/tickers": {"retCode": 0, "result": {"list": [{"lastPrice": "2004"}]}},
+            "/v5/market/instruments-info": {"retCode": 0, "result": {"list": [{
+                "symbol": "ETHUSDT",
+                "lotSizeFilter": {"minOrderQty": "0.01", "qtyStep": "0.01", "maxOrderQty": "2000"},
+                "priceFilter": {"tickSize": "0.01"}}]}},
+            "/v5/order/create": {"retCode": 0, "result": {"orderId": "live-tp1"}},
+            "/v5/position/list": {"retCode": 0, "result": {"list": [{
+                "symbol": "ETHUSDT", "side": "Buy", "size": "0.08", "avgPrice": "2000",
+                "stopLoss": "", "takeProfit": "", "leverage": "50"}]}},
+            "/v5/position/trading-stop": {"retCode": 0, "result": {}},
+        })
+        client = DcaBybitClient(api_key="k", api_secret="s", env="demo", transport=transport)
+        eng = self.engine(client=client)
+        state = eng.load_state()
+        state["position"] = {"side": "Buy", "dir": 1, "stage": 1, "qty": 0.16, "avg": 2000.0,
+                             "leverage": 50.0, "margin": 6.4, "capital": 50.0, "tp": None,
+                             "stop": None, "entry_bar": START, "last_fill_bar": START,
+                             "fills": [], "ai": {}}
+        eng.save_state(state)
+        rec = eng.monitor_position(price=2004.0)
+        self.assertEqual(rec["action"], "TP1", rec["events"])
+        order = [c for c in transport.calls if c["path"] == "/v5/order/create"][0]["body"]
+        self.assertEqual(order["reduceOnly"], True)
+        self.assertEqual(order["side"], "Sell")
+        self.assertEqual(order["qty"], "0.08")
+        self.assertEqual(order["orderType"], "Market")
+        stop = [c for c in transport.calls if c["path"] == "/v5/position/trading-stop"][0]["body"]
+        self.assertEqual(stop["stopLoss"], "2000.6")
+        self.assertEqual(stop["takeProfit"], "2008")
+        self.assertEqual(stop["tpslMode"], "Full")
+        pos = eng.load_state()["position"]
+        self.assertEqual(pos["tp_stage"], 1)
+        self.assertAlmostEqual(pos["qty"], 0.08)
+        self.assertAlmostEqual(pos["realized"], 0.32, places=2)
+
+    def test_monitor_never_calls_ai_and_needs_no_candles(self):
+        class CountingAI:
+            def __init__(self):
+                self.calls = 0
+
+            def describe(self):
+                return {"provider": "fake", "model": "fake"}
+
+            def decide(self, context, cfg):
+                self.calls += 1
+                return {"decision": "LONG", "reason": "x"}
+
+        eng = self.engine()
+        ai = CountingAI()
+        eng.ai = ai
+        self.seed(eng)
+        for price in (2000.0, 2001.0, 2002.0, 2003.0):
+            eng.monitor_position(price=price)
+        self.assertEqual(ai.calls, 0)                      # 5초 감시는 AI를 부르지 않는다
+
+    def test_force_line_delegates_to_a_full_scan(self):
+        eng = self.engine()
+        self.seed(eng)
+        rec = eng.monitor_position(price=1984.0)           # 2차 강제선(-40%)
+        self.assertEqual(rec["action"], "DELEGATE", rec["events"])
+        self.assertTrue(rec["delegate"])
+        candles = flat(120, 2000.0) + bars([1984.0], start=START + 120 * TF)
+        self.assertEqual(self.tick(eng, candles)["action"], "ADD")
+
+    def test_wait_is_not_logged_every_five_seconds(self):
+        eng = self.engine()
+        self.seed(eng)
+        eng.monitor_position(price=2001.0)
+        first = len(Path(eng.log_path).read_text(encoding="utf-8").strip().splitlines())
+        for price in (2001.5, 2002.0, 2002.5):
+            eng.monitor_position(price=price)
+        second = len(Path(eng.log_path).read_text(encoding="utf-8").strip().splitlines())
+        self.assertEqual(first, second)                    # 대기는 10분에 한 번만
+        self.assertTrue(eng.load_state()["last_monitor"]["ts"])
+
+
+class TestLoopCadence(Base):
+    """루프 주기 — 포지션이 없으면 30초, 있으면 5초마다 시세만 본다."""
+
+    class Stub:
+        def __init__(self, position=True, shared=None):
+            import types
+            self.cfg = types.SimpleNamespace(symbol="ETHUSDT")
+            self._last_price = 2000.0
+            self.tf_ms = TF
+            self.shared = shared if shared is not None else {}
+            self.state = {"position": ({"side": "Buy", "qty": 0.16, "stage": 1, "avg": 2000.0,
+                                        "margin": 6.4, "margin_pnl_pct": 0.0, "tp": 2004.0,
+                                        "stop": None} if position else None)}
+            self.last_action = "WAIT"
+
+        def load_state(self):
+            return dict(self.state)
+
+        def tick(self):
+            self.shared.setdefault("tick", []).append("t")
+            return {"ts": "x", "bar_kst": "x", "action": "WAIT", "events": [],
+                    "price": 2000.0, "position": self.state.get("position"),
+                    "stats": {"trades": 0, "win_rate_pct": None, "net_pnl": 0.0,
+                              "avg_margin_pct": None}, "equity": 50.0}
+
+        def monitor_position(self):
+            self.shared.setdefault("monitor", []).append("m")
+            return {"ts": "x", "action": "WAIT", "events": [], "price": 2000.0,
+                    "position": self.state.get("position"), "delegate": False}
+
+    class FakeClock:
+        def __init__(self, start_ms):
+            self.ms = int(start_ms)
+
+        def now(self):
+            return self.ms
+
+        def sleep(self, sec):
+            self.ms += int(round(float(sec) * 1000))
+
+    def test_position_is_watched_every_five_seconds(self):
+        stub = self.Stub(position=True)
+        clock = self.FakeClock(START)
+        stamps = []
+        original = stub.monitor_position
+
+        def mon():
+            stamps.append(clock.ms)
+            return original()
+
+        stub.monitor_position = mon
+        code = run_live_loop(stub, clock=clock.now, sleep=clock.sleep, out=lambda _l: None,
+                             max_rounds=3, status_sec=3600)
+        self.assertEqual(code, 0)
+        self.assertGreaterEqual(len(stamps), 2)
+        self.assertEqual(stamps[1] - stamps[0], 5000)       # 30초가 아니라 5초
+
+    def test_without_position_the_scan_runs_every_thirty_seconds(self):
+        stub = self.Stub(position=False)
+        clock = self.FakeClock(START)
+        stamps = []
+        original = stub.tick
+
+        def tick():
+            stamps.append(clock.ms)
+            return original()
+
+        stub.tick = tick
+        run_live_loop(stub, clock=clock.now, sleep=clock.sleep, out=lambda _l: None,
+                      max_rounds=2, status_sec=3600)
+        self.assertEqual(stamps[1] - stamps[0], 30_000)
+
+    def test_delegate_runs_a_full_scan_instead_of_a_price_check(self):
+        stub = self.Stub(position=True)
+        clock = self.FakeClock(START)
+        calls = {"monitor": 0, "tick": 0}
+
+        def mon():
+            calls["monitor"] += 1
+            return {"ts": "x", "action": "DELEGATE", "events": [], "price": 2000.0,
+                    "position": stub.state.get("position"), "delegate": True}
+
+        def tick():
+            calls["tick"] += 1
+            return {"ts": "x", "bar_kst": "x", "action": "ADD", "events": [],
+                    "price": 2000.0, "position": stub.state.get("position"),
+                    "stats": {"trades": 0, "win_rate_pct": None, "net_pnl": 0.0,
+                              "avg_margin_pct": None}, "equity": 50.0}
+
+        stub.monitor_position = mon
+        stub.tick = tick
+        run_live_loop(stub, clock=clock.now, sleep=clock.sleep, out=lambda _l: None,
+                      max_rounds=2, status_sec=3600)
+        self.assertEqual(calls["monitor"], 2)
+        self.assertEqual(calls["tick"], 2)                 # 감시가 넘기면 바로 전체 점검
 
 
 class TestGuards(Base):

@@ -84,6 +84,8 @@
 
 - 집 PC(Windows)에서 더블클릭으로 돌리는 3개 파일: `run_testnet_auto_mock.bat`(드라이런 1회) ·
   `run_testnet_auto_status.bat`(상태) · `run_testnet_auto.bat`(30분 봉마다 자동 · 1분마다 상태 한 줄 · 상황 맞춤 감시)
+- **포지션 보유 중에는 5초마다 현재가**를 보고 +1.5R에서 50% reduce-only 분할 익절 + 손절을 본절(진입 +0.1%)로
+  이동합니다(소액이라 최소 주문 수량 미달이면 본절 이동만). AI는 여전히 새 M1 후보에서만 부릅니다.
 - 코드: `backend/testnet_auto.py` · 주문 클라이언트: `backend/bybit_client.py` · 테스트: `backend/test_testnet_auto.py`
 - 데모는 테스트넷과 다른 계좌라 상태·로그도 `*.demo`로 따로 쌓입니다. 데모에서 청산 손익 조회가 제한되면
   청산은 기록하고 손익만 '미확인'으로 남기며 루프는 계속 돕니다.
@@ -105,11 +107,12 @@ TP/SL 동봉 · 메인넷 차단이며 기록은 `data/demo_ai_experiment_*`로�
 
 리치 트레이딩 컨트롤러(`ctl/g/config.js` @ `b91184e`)의 `dcaRules`·`followRules`를 그대로 옮긴
 **물타기 엔진**입니다. 5분 완성봉 기준으로 1차 13%(레버리지 기본 50배) → 익절은 평단 대비
-증거금 +10% → 2·3·4차는 증거금 -25/-40/-60%에서 RSI14·볼린저(20, 2.5σ) 조건(강제선 -40/-60/-80%)으로
+증거금 +10%에서 **50% reduce-only 분할 익절 + 손절 본절 이동**, +20%에서 남은 물량 익절(소액이면 +10% 전량 폴백)
+→ 2·3·4차는 증거금 -25/-40/-60%에서 RSI14·볼린저(20, 2.5σ) 조건(강제선 -40/-60/-80%)으로
 15%/33%/100% 추가 → 4차 뒤 평단→청산가 90% 지점에 자동 손절. 1차 방향은 Gemini(5분+4시간)가 정하고,
 키가 없으면 기술 필터가 대신합니다. **데모 전용**이고 기록은 `data/demo_dca_*`로만 남습니다.
 
-- 집 PC: `run_demo_dca_experiment.bat` 더블클릭(30초 점검 · 1분 상태 한 줄 · 5분봉 마감마다 1차 판단)
+- 집 PC: `run_demo_dca_experiment.bat` 더블클릭(포지션 없으면 30초 · 있으면 **5초** 현재가 감시 · 1분 상태 한 줄 · 5분봉 마감마다 1차 판단)
 - 코드: `backend/demo_dca_experiment.py` · 테스트: `backend/test_demo_dca_experiment.py`
 - 안내: [`DEMO_DCA_EXPERIMENT.md`](DEMO_DCA_EXPERIMENT.md) — 원본과 다른 기본값 두 개(4차 100%·추정 청산가 90%)와
   원본 그대로 맞추는 옵션(`--reserve-lev-pct 0.48 --sl-est-dist-pct 80`)도 적어 두었습니다.

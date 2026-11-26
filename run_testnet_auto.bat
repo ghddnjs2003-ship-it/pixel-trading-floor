@@ -11,6 +11,10 @@ echo  Demo Trading: put BYBIT_DEMO=true in backend\.env (see TESTNET_AUTO.md).
 echo  A live status line prints every minute.
 echo  Adaptive watch: 5-min checks while a position is open, volatility spikes,
 echo                  or price is within 0.35%% of the swing high/low (BSL/SSL).
+echo  Position watch: price every 5 seconds while a position is open.
+echo    +1.5R -> sell 50%% as reduce-only and move the stop to break-even (+0.1%%).
+echo    Small size below the exchange minimum -> skip the partial, break-even only.
+echo    The rest runs to the 4R target or the 96-bar time exit.
 echo  Ctrl+C stops the loop. Open positions keep their TP/SL.
 echo ============================================================
 echo.
@@ -33,7 +37,7 @@ if not exist "backend\.env" (
   exit /b 1
 )
 
-echo [INFO] Starting the 30-minute bar loop (5-minute adaptive checks, 1-minute status). First scan runs now.
+echo [INFO] Starting the 30-minute bar loop (5s position watch, 1-minute status). First scan runs now.
 echo.
 python -m backend.testnet_auto --loop --adaptive %*
 set CODE=%ERRORLEVEL%

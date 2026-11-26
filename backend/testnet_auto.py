@@ -6,11 +6,18 @@
 3) 통과하면 다음 봉 시가를 기준으로 3ATR 손절·4R 목표를 계산해 **바이비트 테스트넷 또는 Demo Trading에
    시장가 주문**을 낸다(어느 쪽인지는 클라이언트 환경을 따른다).
    수량·명목가·손실 예산은 `bybit_client`의 50달러 규칙이 정한다(여기서 따로 계산하지 않는다).
-4) 열린 포지션은 거래소에 걸어 둔 TP/SL이 닫는다. 이 모듈은 ① 포지션이 아직 있는지 ② 96봉 시간 청산인지
-   만 보고, 청산이 확인되면 거래소 청산 기록(`/v5/position/closed-pnl`)으로 손익을 남긴다.
+4) 열린 포지션은 **5초마다 현재가만 읽어**(`--pos-tick-sec`, 기본 5초) 두 가지를 본다 — 캔들·AI를 부르지 않는다.
+   ① **+1.5R(`--be-trigger-r`)**: 보유의 **50%를 reduce-only 부분 익절**하고 거래소 SL을 **진입가 +0.1%
+   (수수료 여유) 본절**로 옮긴다. 50달러 소액이라 부분 수량·잔여 수량이 거래소 최소 주문 단위에 못 미치면
+   **부분 익절만 건너뛰고 사유를 남긴 뒤 본절 이동은 그대로** 한다. 나머지 물량은 기존 **4R 목표** 또는
+   **96봉 시각 청산**이 마무리한다. 물타기는 하지 않는다.
+   이 밖에 포지션이 사라졌는지·96봉 시간 청산인지는 봉 점검(`tick`)에서 본다. 청산이 확인되면 거래소
+   청산 기록(`/v5/position/closed-pnl`)으로 손익을 남긴다(부분 익절 몫은 `partial_pnl`로 함께 기록).
    mock 모드에는 거래소가 없으므로 확정 봉의 고가·저가로 손절·목표·시간 청산을 흉내 낸다.
 5) **루프에서 1분마다 상태 한 줄**: 30분을 한 번에 자지 않고 60초마다 현재가·보유/평가손익·감시 모드·
    다음 점검까지 남은 시간을 찍는다(창이 멈춘 것처럼 보이지 않게). 1초 단위로 끊어 자므로 Ctrl+C도 즉시 먹는다.
+   포지션이 열려 있는 동안은 같은 대기 안에서 **5초마다 포지션 감시**(위 4항)를 더 돌린다 — 대기 주기
+   (30분/집중 5분)는 그대로다.
 6) **상황 맞춤 감시(Adaptive Mode, `--adaptive` 또는 `BYBIT_ADAPTIVE=true`)**: 열린 포지션 · 변동성 급증
    (최근 확정 봉 고가-저가 폭 ≥ 최근 20봉 평균 ATR × 1.5) · 현재가가 BSL/SSL(최근 스윙 고점·저점) ±0.35%
    안쪽 중 하나라도 걸리면 **다음 대기를 30분 → 5분**으로 줄인다. 다만 AI 심사는 5분마다가 아니라
@@ -44,6 +51,8 @@
     python -m backend.testnet_auto --once --demo          # 데모 트레이딩(api-demo)으로 1회
     python -m backend.testnet_auto --once --mock          # 키가 있어도 mock 드라이런
     python -m backend.testnet_auto --loop                 # 30분 봉 마감 +90초마다 계속(Ctrl+C 종료) · 1분마다 상태 한 줄
+    python -m backend.testnet_auto --loop --pos-tick-sec 5   # 포지션 보유 중 5초마다 현재가 감시(기본값)
+    python -m backend.testnet_auto --loop --no-partial-tp    # 5초 감시의 분할 익절·본절 이동을 끔
     python -m backend.testnet_auto --loop --adaptive      # 상황 맞춤 감시(집중 5분 / 일반 30분)
     python -m backend.testnet_auto --loop --no-adaptive   # 상황 맞춤 감시 끔(30분 고정)
     python -m backend.testnet_auto --status               # 계좌·포지션·킬스위치·최근 기록
@@ -86,6 +95,10 @@ MAX_SEEN = 500              # 같은 신호를 두 번 처리하지 않기 위�
 
 # 살아 있는 화면 + 상황 맞춤 감시 — '얼마나 자주 볼지'만 정한다(주문 규칙·안전장치는 그대로)
 DEFAULT_TICK_SEC = 60       # 루프가 화면에 상태 한 줄을 찍는 간격(초)
+DEFAULT_POS_TICK_SEC = 5    # 포지션이 열려 있는 동안 현재가를 보는 간격(초)
+DEFAULT_BE_TRIGGER_R = 1.5  # 1차 수익 구간(R) — 절반 익절 + 손절 본절 이동
+DEFAULT_PARTIAL_FRAC = 0.5  # 1차에서 익절하는 보유 비율
+DEFAULT_BE_BUFFER_PCT = 0.1 # 본절 = 진입가 +0.1%(수수료 여유)
 DEFAULT_FOCUS_MIN = 5       # 집중 감시 대기(분)
 DEFAULT_VOL_MULT = 1.5      # 변동성 급증: 최근 확정 봉 폭 / 평균 ATR
 DEFAULT_ATR_PERIOD = 14     # ATR 기간(전략과 같은 Wilder)
@@ -125,6 +138,11 @@ class AutoConfig:
     session: str = "asia"            # 진입 봉이 아시아 세션(00-08 UTC) 안일 때만
     adaptive: bool = False           # 상황 맞춤 감시(집중 5분 / 일반 30분) — 기본은 꺼짐(기존 동작 유지)
     tick_sec: int = DEFAULT_TICK_SEC  # 루프에서 상태 한 줄을 찍는 간격(초)
+    pos_tick_sec: int = DEFAULT_POS_TICK_SEC  # 포지션 보유 중 현재가 확인 간격(초)
+    partial_tp: bool = True          # +be_trigger_r에서 절반 익절 + 손절 본절 이동(5초 감시)
+    be_trigger_r: float = DEFAULT_BE_TRIGGER_R   # 1차 수익 구간(R)
+    partial_frac: float = DEFAULT_PARTIAL_FRAC   # 1차에서 익절하는 비율
+    be_buffer_pct: float = DEFAULT_BE_BUFFER_PCT # 본절 손절 = 진입가 +이 %(수수료 여유)
     focus_interval_min: int = DEFAULT_FOCUS_MIN  # 집중 감시 대기(분)
     vol_atr_mult: float = DEFAULT_VOL_MULT       # 변동성 급증 배수
     atr_period: int = DEFAULT_ATR_PERIOD
@@ -274,6 +292,79 @@ def adaptive_watch(bars: Sequence[Dict], price: Optional[float], has_position: b
         "ssl": round(ssl, 2) if ssl else None,
         "level": level,
     }
+
+
+def split_qty(qty, spec, frac: float = 0.5,
+              price: Optional[float] = None) -> tuple:
+    """분할 익절 수량 — 보유의 frac(기본 50%)을 qtyStep으로 내림한다.
+
+    (수량 Decimal, 실패 사유 str|None). 부분 수량·잔여 수량이 최소 주문 수량에 못 미치거나 부분
+    명목가가 최소 주문 금액에 못 미치면 0과 사유를 돌려준다 — 호출 쪽은 부분 익절을 건너뛰고
+    본절 이동만 한다(50달러 소액 시드에서 주문 거부를 만들지 않으려는 것).
+    """
+    from decimal import Decimal
+    from .bybit_client import floor_to_step, fmt_dec
+    total = floor_to_step(qty, spec.qty_step)
+    if total <= 0:
+        return Decimal("0"), "보유 수량이 없습니다"
+    part = floor_to_step(Decimal(str(total)) * Decimal(str(frac)), spec.qty_step)
+    rest = Decimal(str(total)) - part
+    if part <= 0:
+        return Decimal("0"), (f"분할 수량이 최소 주문 수량({fmt_dec(spec.min_order_qty)})·"
+                              f"qtyStep({fmt_dec(spec.qty_step)})에 못 미칩니다")
+    if part < spec.min_order_qty:
+        return Decimal("0"), (f"분할 수량 {fmt_dec(part)}이 최소 주문 수량 "
+                              f"{fmt_dec(spec.min_order_qty)} 미만입니다")
+    if rest < spec.min_order_qty:
+        return Decimal("0"), (f"남는 수량 {fmt_dec(rest)}이 최소 주문 수량 "
+                              f"{fmt_dec(spec.min_order_qty)} 미만입니다")
+    if spec.min_notional is not None and price:
+        notional = float(part) * float(price)
+        if notional < float(spec.min_notional):
+            return Decimal("0"), (f"분할 명목가 ${notional:,.2f}가 최소 주문 금액 "
+                                  f"${fmt_dec(spec.min_notional)} 미만입니다")
+    return part, None
+
+
+def breakeven_price(side: str, entry: float, buffer_pct: float = DEFAULT_BE_BUFFER_PCT,
+                    tick=None) -> float:
+    """본절 손절가 — 롱은 진입가 × (1 + buffer%), 숏은 × (1 − buffer%).
+
+    수수료 여유(기본 +0.1%)를 더해 본전 이상으로 마감되게 하고, tickSize로 반올림한 뒤에도
+    진입가와 같아지면 1 tick만큼 수익 쪽으로 밀어 둔다(거래소가 손절가=진입가를 거부한다).
+    """
+    from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
+    entry = float(entry)
+    if entry <= 0:
+        return 0.0
+    sign = 1.0 if str(side).lower() in ("buy", "long") else -1.0
+    raw = entry * (1 + sign * float(buffer_pct) / 100.0)
+    if tick is None:
+        return raw
+    unit = Decimal(str(tick))
+    base = Decimal(str(entry)) / unit
+    n = Decimal(str(raw)) / unit
+    if sign > 0:
+        k = max(n.to_integral_value(rounding=ROUND_CEILING),
+                base.to_integral_value(rounding=ROUND_FLOOR) + 1)
+    else:
+        k = min(n.to_integral_value(rounding=ROUND_FLOOR),
+                base.to_integral_value(rounding=ROUND_CEILING) - 1)
+    return float(k * unit)
+
+
+def format_monitor_line(rec: Dict) -> str:
+    """5초 감시 결과 중 사람이 볼 만한 것(분할 익절·본절)만 한 줄로."""
+    when = datetime.fromtimestamp(
+        datetime.fromisoformat(rec["ts"]).timestamp(), tz=KST).strftime("%H:%M:%S")
+    parts = [f"[testnet-auto] {when} KST · 5초 감시 · {rec.get('action')}"]
+    if rec.get("price"):
+        parts.append(f"{float(rec['price']):,.2f}")
+    if rec.get("r") is not None:
+        parts.append(f"{float(rec['r']):+.2f}R")
+    if rec.get("events"):
+        parts.append(" | ".join(rec["events"]))
+    return " · ".join(parts)
 
 
 def _unrealized(price: Optional[float], pos: Dict) -> Optional[Dict]:
@@ -592,6 +683,9 @@ class TestnetAuto:
             "r_sum": round(sum(r_values), 2),
             "targets": sum(1 for t in closed if t.get("reason") == "TARGET"),
             "stops": sum(1 for t in closed if t.get("reason") == "STOP"),
+            "breakevens": sum(1 for t in closed if t.get("reason") == "BREAKEVEN"),
+            "partial_trades": sum(1 for t in closed if t.get("partial_pnl")),
+            "partial_pnl": round(sum(float(t.get("partial_pnl") or 0.0) for t in closed), 4),
             "time_exits": sum(1 for t in closed if t.get("reason") == "TIME"),
             "last_trade_at": closed[-1].get("exit_time") if closed else None,
         }
@@ -884,7 +978,9 @@ class TestnetAuto:
         return {"side": pos["side"], "qty": pos["qty"], "entry": pos["entry"],
                 "stop": pos["stop"], "target": pos["target"], "leverage": pos.get("leverage"),
                 "risk_usd": pos.get("risk_usd"), "order_id": pos.get("order_id"),
-                "entry_at": pos.get("entry_time"), "ai": (pos.get("ai") or {}).get("decision")}
+                "entry_at": pos.get("entry_time"), "ai": (pos.get("ai") or {}).get("decision"),
+                "tp1_done": bool(pos.get("tp1_done")), "be": pos.get("be"),
+                "partial": pos.get("partial"), "realized": pos.get("realized")}
 
     def _killswitch_summary(self) -> Dict:
         status = self.killswitch.status()
@@ -893,6 +989,153 @@ class TestnetAuto:
                 "tripped": st.get("tripped"), "tripped_until": st.get("tripped_until"),
                 "manual_stop": st.get("manual_stop"), "realized_pnl": st.get("realized_pnl"),
                 "trades_today": st.get("trades"), "rules": status["rules"]}
+
+    # ------------------------------------------------------------------ 5초 포지션 감시
+    def monitor_position(self, price: Optional[float] = None,
+                         now_ms: Optional[int] = None) -> Dict:
+        """포지션 5초 감시 — 시세(티커)만 읽고 +1.5R에서 절반 익절 + 손절을 본절로 올린다.
+
+        * AI도 캔들도 부르지 않는다(무료 한도 보호) — 진입 심사는 새 30분봉 M1 후보에서만 한다.
+        * 1차 수익(+be_trigger_r, 기본 1.5R): 보유의 50%를 reduce-only 부분 익절하고, 거래소 SL을
+          진입가 +0.1%(수수료 여유) 본절로 옮긴다. 남은 물량은 기존 4R 목표·96봉 시각 청산이 마무리한다.
+        * 50달러 소액 시드라 50% 수량·잔여 수량이 거래소 최소 주문 단위에 못 미치면 **부분 익절만 건너뛰고**
+          사유를 남긴 뒤 본절 이동은 그대로 한다(주문 거부를 만들지 않는다).
+        * 물타기는 하지 않는다. 진입·손절·목표·수량 규칙(50달러 안전선)은 한 글자도 바꾸지 않는다.
+        """
+        now_ms = int(now_ms if now_ms is not None else self.now().timestamp() * 1000)
+        state = self.load_state()
+        pos = state.get("position")
+        rec: Dict = {"ts": self.now().isoformat(timespec="seconds"), "kind": "monitor",
+                     "mode": self.mode, "env": self.env, "testnet_only": True,
+                     "sandbox_only": True, "base_url": self.client.base_url,
+                     "action": "IDLE", "price": None, "r": None, "events": [],
+                     "position": self._position_view(state)}
+        if not pos:
+            rec["events"] = ["포지션 없음 — 봉 마감 점검만 돕니다"]
+            return rec
+        px = price
+        if px is None:
+            try:
+                px = float(self.client.get_last_price(self.cfg.symbol))
+            except Exception as exc:
+                rec["action"] = "ERROR"
+                rec["events"] = [f"시세 조회 실패({exc}) — 다음 감시에서 다시 봅니다"]
+                return rec
+        if not px or float(px) <= 0:
+            rec["action"] = "ERROR"
+            rec["events"] = ["현재가를 읽지 못했습니다 — 다음 감시에서 다시 봅니다"]
+            return rec
+        px = float(px)
+        rec["price"] = round(px, 2)
+        entry = float(pos.get("entry") or 0.0)
+        sign = 1.0 if str(pos.get("side") or "").lower() in ("buy", "long") else -1.0
+        risk_unit = float(pos.get("risk_per_unit") or 0.0)
+        if risk_unit <= 0:
+            stop0 = float(pos.get("stop0") or pos.get("stop") or 0.0)
+            risk_unit = abs(entry - stop0)
+        r_value = ((px - entry) * sign / risk_unit) if (risk_unit > 0 and entry > 0) else None
+        rec["r"] = None if r_value is None else round(r_value, 3)
+        events: List[str] = []
+        action = "WAIT"
+        if (self.cfg.partial_tp and r_value is not None and r_value >= float(self.cfg.be_trigger_r) - 1e-9
+                and not (pos.get("partial_done") and pos.get("tp1_done"))):
+            action, events = self._first_target(state, pos, px)
+        elif pos.get("tp1_done") and float(pos.get("target") or 0) > 0:
+            if sign * (px - float(pos["target"])) >= 0:
+                action = "TARGET_WAIT"
+                events.append(f"목표 {float(pos['target']):,.2f} 도달 — 거래소 TP가 남은 물량을 익절합니다")
+        if not events:
+            events.append("감시 중 — 다음 봉 점검을 기다립니다")
+        rec["action"] = action
+        rec["events"] = events
+        rec["position"] = self._position_view(state)
+        state["last_monitor"] = {k: rec[k] for k in ("ts", "action", "price", "r", "events")}
+        state["monitor_count"] = int(state.get("monitor_count") or 0) + 1
+        self.save_state(state)
+        self._log_monitor(state, rec)
+        return rec
+
+    def _first_target(self, state: Dict, pos: Dict, price: float) -> tuple:
+        """+1.5R — 절반 reduce-only 익절(가능하면) + 손절을 본절로. (action, events)
+
+        부분 익절과 본절 이동을 따로 표시한다(`partial_done`·`tp1_done`) — 본절 설정이 실패해 다시 부를 때
+        이미 줄인 수량을 또 줄이지 않는다.
+        """
+        events: List[str] = []
+        spec = self.client.get_instrument(self.cfg.symbol)
+        side = str(pos.get("side") or "Buy")
+        qty = float(pos.get("qty") or 0.0)
+        did_partial = bool(pos.get("partial_done"))
+        if not did_partial:
+            part, why = split_qty(qty, spec, float(self.cfg.partial_frac), price)
+            if part <= 0:
+                events.append(f"분할 익절 건너뜀 — {why} → 본절 이동만 합니다")
+                pos["partial_done"] = True          # 이 포지션에서는 다시 시도하지 않는다(본절만)
+                pos["split_off"] = why
+            else:
+                try:
+                    order = self.client.reduce_only_order(
+                        self.cfg.symbol, "Sell" if side == "Buy" else "Buy", part)
+                    events.append(f"1차 분할 익절 {float(part):g}개 @ {price:,.2f} "
+                                  f"(주문 {(order or {}).get('orderId')})")
+                    pos["partial"] = {"qty": round(float(part), 8), "price": round(price, 2),
+                                      "at": self.now().isoformat(timespec="seconds"),
+                                      "order_id": (order or {}).get("orderId")}
+                    pos["partial_done"] = True
+                    pos["realized"] = round(float(pos.get("realized") or 0.0)
+                                            + ((price - float(pos["entry"]))
+                                               * (1.0 if side == "Buy" else -1.0) * float(part)), 6)
+                    try:
+                        rows = [p for p in self.client.get_positions(self.cfg.symbol)
+                                if float(p.get("size") or 0) > 0]
+                        ex = max(rows, key=lambda p: float(p["size"])) if rows else None
+                    except BybitError:
+                        ex = None
+                    rest = float((ex or {}).get("size") or 0.0) or max(0.0, qty - float(part))
+                    pos["qty"] = round(rest, 8)
+                except (OrderRejected, BybitError, ValueError) as exc:
+                    events.append(f"분할 익절 실패: {exc} — 본절 이동만 합니다")
+                    pos["partial_done"] = True      # 다시 부분 익절을 시도하지 않는다(중복 축소 방지)
+                    pos["partial_error"] = str(exc)[:200]
+        # 본절 이동 — 부분 익절 여부와 상관없이 한다(이후 역행해도 본전 이상으로 마감)
+        if pos.get("tp1_done"):
+            events.append(f"이미 본절 손절 {float(pos.get('be') or 0):,.2f}로 옮겨 두었습니다")
+            return ("PARTIAL" if (did_partial or pos.get("partial")) else "BREAKEVEN"), events
+        pos["stop0"] = float(pos.get("stop0") or pos.get("stop") or 0.0)
+        be = breakeven_price(side, float(pos["entry"]), float(self.cfg.be_buffer_pct),
+                             spec.tick_size)
+        try:
+            self.client.set_trading_stop(self.cfg.symbol, stop_loss=be)
+            pos["be"] = round(float(be), 2)
+            pos["stop"] = round(float(be), 2)
+            pos["tp1_done"] = True
+            pos["be_at"] = self.now().isoformat(timespec="seconds")
+            events.append(f"손절선을 본절 {float(be):,.2f}(진입 {float(pos['entry']):,.2f} +"
+                          f"{float(self.cfg.be_buffer_pct):g}%)로 옮겼습니다")
+        except BybitError as exc:
+            events.append(f"본절 이동 실패: {exc} — 다음 감시에서 다시 시도합니다")
+        return ("PARTIAL" if pos.get("partial") else "BREAKEVEN"), events
+
+    def _log_monitor(self, state: Dict, rec: Dict) -> None:
+        """감시 기록 — 행동은 항상, 대기는 10분에 한 번만 남긴다(5초마다 로그가 부풀지 않게)."""
+        action = rec.get("action")
+        now = self.now().timestamp()
+        if action not in ("WAIT", "IDLE", "TARGET_WAIT"):
+            self._append_log(rec)
+            state["last_monitor_log"] = rec["ts"]
+            self.save_state(state)
+            return
+        last = state.get("last_monitor_log")
+        due = True
+        if last:
+            try:
+                due = (now - datetime.fromisoformat(last).timestamp()) >= 600
+            except ValueError:
+                due = True
+        if due:
+            self._append_log(rec)
+            state["last_monitor_log"] = rec["ts"]
+            self.save_state(state)
 
     # ------------------------------------------------------------------ 포지션
     def _position_from_order(self, order: Dict, sig: Dict, verdict: Optional[Dict],
@@ -905,7 +1148,11 @@ class TestnetAuto:
             "qty": plan.get("qty"),
             "entry": float(payload.get("price") or plan.get("entryPrice") or 0.0),
             "stop": float(payload.get("stopLoss") or plan.get("stopPrice") or 0.0),
+            "stop0": float(payload.get("stopLoss") or plan.get("stopPrice") or 0.0),
             "target": float(payload.get("takeProfit") or plan.get("takeProfit") or 0.0),
+            "risk_per_unit": abs(float(payload.get("price") or plan.get("entryPrice") or 0.0)
+                                 - float(payload.get("stopLoss") or plan.get("stopPrice") or 0.0)),
+            "tp1_done": False, "be": None, "partial": None, "realized": 0.0,
             "leverage": plan.get("leverage"),
             "risk_usd": plan.get("expectedLossUsd"),
             "loss_budget_usd": plan.get("lossBudgetUsd"),
@@ -940,6 +1187,8 @@ class TestnetAuto:
         if not pos:
             return None
         side, stop, target = pos["side"], float(pos["stop"]), float(pos["target"])
+        be = float(pos.get("be") or 0.0)
+        stop_reason = "BREAKEVEN" if (be and abs(stop - be) < 1e-9) else "STOP"
         entry_bar = int(pos.get("entry_bar_time") or 0)
         count = 0
         for bar in bars:
@@ -949,12 +1198,12 @@ class TestnetAuto:
             count += 1
             if side == "Buy":
                 if float(bar["l"]) <= stop:
-                    return self._mock_close(state, pos, "STOP", stop, t, equity)
+                    return self._mock_close(state, pos, stop_reason, stop, t, equity)
                 if float(bar["h"]) >= target:
                     return self._mock_close(state, pos, "TARGET", target, t, equity)
             else:
                 if float(bar["h"]) >= stop:
-                    return self._mock_close(state, pos, "STOP", stop, t, equity)
+                    return self._mock_close(state, pos, stop_reason, stop, t, equity)
                 if float(bar["l"]) <= target:
                     return self._mock_close(state, pos, "TARGET", target, t, equity)
             if self.cfg.time_exit and count >= self.cfg.max_bars:
@@ -972,6 +1221,9 @@ class TestnetAuto:
         entry = float(pos["entry"])
         sign = 1.0 if pos["side"] == "Buy" else -1.0
         pnl = (price - entry) * qty * sign              # mock은 수수료를 넣지 않는다
+        partial_pnl = float(pos.get("realized") or 0.0)
+        if partial_pnl:
+            pnl += partial_pnl                          # 1차 부분 익절 몫을 합쳐 거래 손익으로
         risk = float(pos.get("risk_usd") or 0.0)
         trade = self._trade(pos, reason, price, round(pnl, 4),
                             round(pnl / risk, 3) if risk else None, bar_time)
@@ -1041,6 +1293,9 @@ class TestnetAuto:
             return "UNKNOWN"
         stop, target = float(pos.get("stop") or 0.0), float(pos.get("target") or 0.0)
         tol = max(float(pos.get("entry") or 0.0) * 0.002, 1e-9)   # 0.2% — 호가·슬리피지 여유
+        be = float(pos.get("be") or 0.0)
+        if be and abs(float(exit_price) - be) <= tol:
+            return "BREAKEVEN"                                      # 1차 익절 뒤 본절 손절
         if stop and abs(float(exit_price) - stop) <= tol:
             return "STOP"
         if target and abs(float(exit_price) - target) <= tol:
@@ -1053,6 +1308,8 @@ class TestnetAuto:
             "side": pos["side"], "qty": pos["qty"], "entry": pos["entry"], "exit": exit_price,
             "stop": pos["stop"], "target": pos["target"], "risk_usd": pos.get("risk_usd"),
             "reason": reason, "pnl": pnl, "r": r, "mode": self.mode,
+            "tp1_done": bool(pos.get("tp1_done")), "be": pos.get("be"),
+            "partial_pnl": pos.get("realized"), "partial": pos.get("partial"),
             "order_id": pos.get("order_id"), "signal_time": pos.get("signal_time"),
             "entry_time": pos.get("entry_time"),
             "exit_time": self.now().isoformat(timespec="seconds"),
@@ -1406,6 +1663,12 @@ def print_banner(engine: TestnetAuto) -> None:
     else:
         print(f"[testnet-auto] 감시: 일반 {engine.interval_min}분 고정"
               f"(--adaptive 또는 BYBIT_ADAPTIVE=true로 상황 맞춤 감시)", flush=True)
+    if engine.cfg.partial_tp:
+        print(f"[testnet-auto] 포지션 감시: {engine.cfg.pos_tick_sec}초마다 현재가 — "
+              f"+{engine.cfg.be_trigger_r:g}R에서 {engine.cfg.partial_frac * 100:g}% reduce-only 익절 + "
+              f"손절을 본절(진입 +{engine.cfg.be_buffer_pct:g}%)로 이동 · 소액이면 본절만", flush=True)
+    else:
+        print("[testnet-auto] 포지션 감시: 분할 익절·본절 이동 꺼짐(--no-partial-tp)", flush=True)
 
 
 def print_record(rec: Dict) -> None:
@@ -1477,6 +1740,9 @@ def run_live_loop(engine: TestnetAuto, *, quiet: bool = False, tick_sec: int = D
     normal_min = engine.interval_min
     watch: Dict = {"adaptive": bool(engine.cfg.adaptive), "mode": "normal",
                    "interval_min": normal_min, "reasons": []}
+    pos_tick_sec = max(1, int(getattr(engine.cfg, "pos_tick_sec", DEFAULT_POS_TICK_SEC)))
+    has_pos = False
+    next_pos_check = clock()
     rounds = 0
     try:
         while True:
@@ -1488,8 +1754,15 @@ def run_live_loop(engine: TestnetAuto, *, quiet: bool = False, tick_sec: int = D
                     out(f"[testnet-auto] 스캔 실패: {exc} — 다음 점검까지 기다립니다")
             if rec is not None:
                 watch = rec.get("watch") or watch
+                has_pos = bool(rec.get("position"))
                 if not quiet:
                     print_record(rec)
+            else:
+                try:
+                    has_pos = bool((engine.load_state() or {}).get("position"))
+                except Exception:
+                    has_pos = False
+            next_pos_check = clock()
             rounds += 1
             if max_rounds is not None and rounds >= int(max_rounds):
                 return 0
@@ -1515,6 +1788,18 @@ def run_live_loop(engine: TestnetAuto, *, quiet: bool = False, tick_sec: int = D
                     break
                 sleep(min(1.0, max(0.05, (due - now) / 1000.0)))
                 now = clock()
+                # 포지션이 열려 있으면 5초마다 시세만 보고 +1.5R 분할 익절·본절 이동을 본다
+                if has_pos and now >= next_pos_check and hasattr(engine, "monitor_position"):
+                    mon = None
+                    try:
+                        mon = engine.monitor_position()
+                    except Exception as exc:
+                        if not quiet:
+                            out(f"[testnet-auto] 5초 감시 실패: {exc} — 다음 감시에서 다시 봅니다")
+                    if mon is not None and not quiet \
+                            and mon.get("action") not in (None, "WAIT", "IDLE", "TARGET_WAIT"):
+                        out(format_monitor_line(mon))
+                    next_pos_check = now + pos_tick_sec * 1000
                 if quiet or now < next_tick:
                     continue
                 quote = engine.quote()
@@ -1553,6 +1838,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     help="상황 맞춤 감시 끔(30분 고정)")
     ap.add_argument("--tick-sec", type=int, default=DEFAULT_TICK_SEC,
                     help="루프에서 상태 한 줄을 찍는 간격(초, 기본 60)")
+    ap.add_argument("--pos-tick-sec", type=int, default=DEFAULT_POS_TICK_SEC,
+                    help="포지션 보유 중 현재가를 보는 간격(초, 기본 5)")
+    ap.add_argument("--be-trigger-r", type=float, default=DEFAULT_BE_TRIGGER_R,
+                    help="1차 수익 구간(R) — 절반 익절 + 손절 본절 이동(기본 1.5)")
+    ap.add_argument("--partial-frac", type=float, default=DEFAULT_PARTIAL_FRAC,
+                    help="1차에서 익절하는 보유 비율(기본 0.5)")
+    ap.add_argument("--be-buffer-pct", type=float, default=DEFAULT_BE_BUFFER_PCT,
+                    help="본절 손절 = 진입가 +이 %%(수수료 여유, 기본 0.1)")
+    ap.add_argument("--no-partial-tp", dest="partial_tp", action="store_false", default=True,
+                    help="5초 감시의 분할 익절·본절 이동을 끈다(기존처럼 거래소 TP/SL만)")
     ap.add_argument("--focus-min", type=int, default=DEFAULT_FOCUS_MIN,
                     help="집중 감시 대기(분, 기본 5)")
     ap.add_argument("--symbol", default="BTCUSDT")
@@ -1594,6 +1889,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                      stop_atr=args.stop_atr, max_bars=args.max_bars,
                      time_exit=not args.no_time_exit, replay=bool(args.candles),
                      adaptive=adaptive, tick_sec=max(5, int(args.tick_sec)),
+                     pos_tick_sec=max(1, int(args.pos_tick_sec)),
+                     partial_tp=bool(args.partial_tp),
+                     be_trigger_r=float(args.be_trigger_r),
+                     partial_frac=float(args.partial_frac),
+                     be_buffer_pct=float(args.be_buffer_pct),
                      focus_interval_min=max(1, int(args.focus_min)),
                      state_path=args.state or "", log_path=args.log or "",
                      killswitch_path=args.killswitch or "")
