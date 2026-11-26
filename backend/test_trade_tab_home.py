@@ -42,6 +42,11 @@ class TabNameTest(unittest.TestCase):
         self.assertNotIn(">데모 트레이딩</button>", self.js,
                          "상단 탭의 '데모 트레이딩' 이름은 '트레이딩'으로 바뀌어야 합니다")
 
+    def test_cockpit_settings_labels_match_v31(self):
+        cockpit = read("lite/cockpit.js")
+        self.assertIn("const VERSION = 'v31';", cockpit, "⚙️ 설정의 웹 버전 표시")
+        self.assertIn("픽셀 오피스 · 트레이딩", cockpit, "설정 창 부제도 탭 이름과 맞춘다")
+
     def test_page_label_is_trading(self):
         self.assertIn("page.setAttribute('aria-label', '트레이딩');", self.js)
 
@@ -202,6 +207,10 @@ class LayoutTest(unittest.TestCase):
     def test_home_and_demo_are_mutually_exclusive(self):
         self.assertIn('#trade-page[data-mode="home"] > *:not(.trade-home)', self.css)
         self.assertIn('#trade-page[data-mode="demo"] > .trade-home', self.css)
+
+    def test_global_chip_strip_hidden_on_trade_tab(self):
+        self.assertIn("html.trading-view #dash-chips { display: none !important; }", self.css,
+                      "트레이딩 탭은 시안처럼 자기 머리말만 보여야 합니다(대시보드 칩 숨김)")
 
     def test_mobile_home_scrolls(self):
         self.assertIn('html.trading-view #trade-page[data-mode="home"] { overflow-y: auto;', self.css,

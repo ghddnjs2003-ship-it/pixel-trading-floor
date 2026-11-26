@@ -26,7 +26,7 @@
   const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
   const safe = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-  const VERSION = 'v27';
+  const VERSION = 'v31';
   const KEY = 'pixel-auto-cockpit-v1';
   const DECISION_KEY = 'pixel-lite-latest-decision-v1';
   const WORKER_URL = 'https://pixel-global.jooyon124.workers.dev/global.json';
@@ -595,7 +595,7 @@
   modal.innerHTML = `
     <div class="ta-modal-box">
       <button class="ta-x" id="cs-close" type="button" aria-label="닫기">✕</button>
-      <h2>⚙️ 설정 <span>픽셀 오피스 · 데모 트레이딩</span></h2>
+      <h2>⚙️ 설정 <span>픽셀 오피스 · 트레이딩</span></h2>
 
       <section class="ta-sec">
         <h3>연결 상태</h3>
