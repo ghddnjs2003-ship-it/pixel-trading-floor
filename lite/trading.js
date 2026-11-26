@@ -32,19 +32,79 @@
   const nav = document.createElement('nav');
   nav.id = 'view-switch';
   nav.setAttribute('aria-label', '화면 전환');
-  // 메인 탭 4개 — 트레이딩(기본) · 데모 트레이딩 · 고래·일정 · 픽셀 오피스
-  nav.innerHTML = '<button type="button" data-view="dash">트레이딩</button><button type="button" data-view="trading">데모 트레이딩</button><button type="button" data-view="whale" title="실시간 고래 입출금 · 이번 주 경제 일정">고래·일정</button><button type="button" data-view="office">픽셀 오피스</button>';
+  // 메인 탭 4개 — 시장 대시보드(기본) · 트레이딩 · 고래·일정 · 픽셀 오피스
+  // (2026-11-26 홍원 님 "시장대시보드는 나두고 그옆에 데모트레이딩 버튼을 바꿔야지" — 두 번째 탭 이름만 '트레이딩'으로)
+  nav.innerHTML = '<button type="button" data-view="dash">시장 대시보드</button><button type="button" data-view="trading">트레이딩</button><button type="button" data-view="whale" title="실시간 고래 입출금 · 이번 주 경제 일정">고래·일정</button><button type="button" data-view="office">픽셀 오피스</button>';
   topbar.insertBefore(nav, $('#controls'));
   nav.addEventListener('click', (event) => {
     const button = event.target.closest('[data-view]');
-    if (button) setView(button.dataset.view);
+    if (!button) return;
+    // '트레이딩' 탭을 누르면 그 탭의 첫 화면(홈)부터 — 데모 주문 화면은 홈의 '데모 모드로 체험'으로 들어간다
+    if (button.dataset.view === 'trading') setTradeMode('home');
+    setView(button.dataset.view);
   });
 
   const page = document.createElement('section');
   page.id = 'trade-page';
-  page.setAttribute('aria-label', '데모 트레이딩');
+  page.setAttribute('aria-label', '트레이딩');
+  page.dataset.mode = 'home';
   page.innerHTML = `
+    <section class="trade-home" id="trade-home" aria-label="트레이딩 홈">
+      <div class="th-statusbar">
+        <span class="th-conn" id="th-conn" title="바이비트 실전 키는 아직 연결되지 않았습니다">미연결</span>
+        <button type="button" class="th-small" id="th-guide">가이드</button>
+        <span class="th-conn-note dim" id="th-conn-note">데모 기록 확인 중…</span>
+        <button type="button" class="th-small th-live-guide" id="th-live-guide">실전 안내</button>
+      </div>
+
+      <section class="th-card th-verdict" aria-label="판정">
+        <header class="th-head"><span class="th-num">1</span><h2>판정</h2></header>
+        <p class="th-verdict-msg" id="th-verdict-msg">바이비트 연결 후 AI 최신 분석과 주문 칸이 열립니다.</p>
+        <p class="th-verdict-line" id="th-verdict-line">최근 30분봉 AI 판정 · 기록을 확인하는 중…</p>
+      </section>
+
+      <section class="th-card th-auto" aria-label="오토 모드">
+        <header class="th-head"><h2><span class="th-bolt">⚡</span> 오토 모드</h2><span class="th-sub" id="th-auto-sub">AI 오토 모드 상태</span></header>
+        <div class="th-state" id="th-auto-state">○ 지금 열린 포지션 없음 (연결 대기)</div>
+        <p class="th-hint">연결 후 실전·데모 포지션과 가격 정보가 열립니다.</p>
+        <div class="th-auto-actions">
+          <button type="button" class="th-connect" id="th-connect">바이비트 연결하기</button>
+          <button type="button" class="th-demo" id="th-demo">데모 모드로 체험</button>
+        </div>
+      </section>
+
+      <div class="th-coins-row">
+        <span class="th-coin-badge" title="실전 리스크 기준 최대 3배">코인 3×</span>
+        <div class="th-coins" id="th-coins" role="group" aria-label="코인 선택">${['BTC', 'ETH', 'SOL', 'XRP', 'DOGE'].map((coin) => `<button type="button" data-coin="${coin}" class="${coin === 'BTC' ? 'active' : ''}" aria-pressed="${coin === 'BTC'}'>${coin}</button>`).join('')}</div>
+      </div>
+      <p class="th-chart-meta"><span id="th-tv-symbol">BYBIT:BTCUSDT.P</span> · <span>TradingView 실시간 차트</span></p>
+      <div class="th-frames" id="th-frames" role="group" aria-label="타임프레임">${[['15', '15m'], ['30', '30m'], ['60', '1H'], ['240', '4H']].map(([key, label]) => `<button type="button" data-frame="${key}" class="${key === '15' ? 'active' : ''}" aria-pressed="${key === '15'}'>${label}</button>`).join('')}</div>
+      <div class="th-chart">
+        <div id="th-tv-chart"></div>
+        <div id="th-tv-note" role="status">트레이딩뷰 차트를 불러오는 중…</div>
+      </div>
+
+      <section class="th-card th-signals" aria-label="최근 익절 · 청산 신호">
+        <header class="th-head"><h2>최근 익절 · 청산 신호</h2></header>
+        <p class="th-sig-sub">최근 30분봉 AI · 데모 실제 기록 기준</p>
+        <p class="th-sig-note">% = 증거금 기준 · 거래 비용 반영</p>
+        <ul class="th-sig-list" id="th-sig-list"><li class="th-sig-empty">기록을 불러오는 중…</li></ul>
+        <p class="th-sig-foot" id="th-sig-foot">data/paper_state.json · data/paper_log.jsonl</p>
+      </section>
+
+      <div class="th-modal hidden" id="th-modal" role="dialog" aria-modal="true" aria-labelledby="th-modal-title">
+        <div class="th-modal-box">
+          <header><h2 id="th-modal-title">가이드</h2><button type="button" id="th-modal-close" aria-label="닫기">✕</button></header>
+          <div class="th-modal-body" id="th-modal-body"></div>
+          <footer>
+            <button type="button" class="th-connect" id="th-modal-settings">⚙️ 연결 설정 열기</button>
+            <button type="button" class="th-demo" id="th-modal-ok">닫기</button>
+          </footer>
+        </div>
+      </div>
+    </section>
     <header class="trade-marketbar">
+      <button type="button" id="trade-home-back" class="trade-home-back" title="트레이딩 홈으로 (연결 전 화면)">‹ 홈</button>
       <label class="trade-coin-select"><span>종목</span><select id="trade-coin" aria-label="코인 선택">${COINS.map((coin) => `<option value="${coin}">${coin}/USDT</option>`).join('')}</select></label>
       <div class="trade-quote"><small>LAST PRICE</small><b id="trade-price">—</b><span id="trade-change">—</span></div>
       <div class="trade-account"><span>모의 잔고 <b id="trade-balance">—</b> USDT</span><span>평가 자산 <b id="trade-equity">—</b> USDT</span><span>주문 가능 <b id="trade-available">—</b> USDT</span></div>
@@ -105,6 +165,7 @@
     </div>
     <footer class="trade-account-footer"><span>모의 계좌</span><span>잔고 <b id="trade-footer-balance">—</b> USDT</span><span>평가 자산 <b id="trade-footer-equity">—</b> USDT</span><span>미실현 손익 <b id="trade-footer-pnl">—</b> USDT</span><span>사용 가능 <b id="trade-footer-available">—</b> USDT</span></footer>`;
   document.body.appendChild(page);
+  wireHome();
 
   // 휴대폰: 한 번에 한 화면 — 차트 · 주문 · 호가 · 포지션 (넓은 화면은 탭을 숨기고 세 칸을 함께 보여 준다)
   const PANE_SELECTORS = { chart: '.trade-chart-panel', order: '.trade-ticket', book: '.trade-orderbook', positions: '.trade-orders-panel' };
@@ -226,6 +287,15 @@
       refreshTimer();
       renderPositions();
       if (state.mobileView === 'chart') requestAnimationFrame(mountTradingView);
+      // 트레이딩 홈 — 보이는 동안만 트레이딩뷰 위젯과 데모 기록(paper_state·paper_log)을 갱신한다
+      if (home.mode === 'home') {
+        requestAnimationFrame(mountHomeTv);
+        loadHomeData();
+      }
+      if (home.timer) clearInterval(home.timer);
+      home.timer = setInterval(() => {
+        if (document.visibilityState !== 'hidden' && state.view === 'trading' && home.mode === 'home') loadHomeData();
+      }, 180000);
     } else {
       if (state.loadTimer) clearInterval(state.loadTimer);
       if (state.markTimer) clearInterval(state.markTimer);
@@ -233,6 +303,7 @@
       state.markTimer = 0;
       if (state.feed) state.feed.want([]);
       if (LITE.live && typeof LITE.live.refresh === 'function') LITE.live.refresh();
+      if (home.timer) { clearInterval(home.timer); home.timer = 0; }
     }
   }
 
@@ -729,6 +800,366 @@
     if (table) table.classList.toggle('is-empty', !!body.querySelector('.trade-empty'));
   }
 
+  /* ======================================================================
+     트레이딩 홈 — 2026-11-26 시안(downloads/trading_tab_mockup_2026-11-26.png)
+     · 상단 상태 바 → 1 판정 → ⚡ 오토 모드 → 코인/타임프레임 + 트레이딩뷰 실시간 차트
+       → 최근 익절 · 청산 신호
+     · 기록은 실제 파일(data/paper_state.json · data/paper_log.jsonl)만 읽는다.
+       청산 건이 0건이면 보유 중인 모의 포지션과 최근 스캔을 그대로 적는다 — 지어낸 수익률은 넣지 않는다.
+     · 기존 데모 조종석·수동 주문 화면은 '데모 모드로 체험'에서 같은 탭 안에 연다.
+     ====================================================================== */
+  const HOME_STATE_URL = 'data/paper_state.json';
+  const HOME_LOG_URL = 'data/paper_log.jsonl';
+  const HOME_REASON_KO = { TARGET: '익절', STOP: '손절', TIME: '시간 청산' };
+  const HOME_ACTION_KO = { HOLD: '관망', OPEN: '진입', CLOSE: '청산', SKIP: '건너뜀', REJECT: '거절' };
+  // 검증된 기록(2026-11-19 3.4년 88건 · 아웃샘플 PF 2.02) — 데모 신호가 아닌 '백테스트 참고'로만 표시한다
+  const HOME_BACKTEST = '30m M1 아시아+AI · PF 2.02';
+  const home = { mode: 'home', coin: 'BTC', frame: '15', widget: null, tvSymbol: '', tvInterval: '', paper: null, log: [], error: '', at: 0, seq: 0, timer: 0, noteTimer: 0 };
+
+  const homeSymbol = (coin) => `BYBIT:${String(coin || 'BTC').toUpperCase()}USDT.P`;
+
+  function homeAgeText(iso) {
+    const t = Date.parse(iso);
+    if (!Number.isFinite(t)) return '';
+    const min = Math.max(0, (Date.now() - t) / 60000);
+    if (min < 1) return '방금';
+    if (min < 60) return `${Math.round(min)}분 전`;
+    if (min < 1440) return `${Math.floor(min / 60)}시간 ${Math.round(min % 60)}분 전`;
+    return `${Math.floor(min / 1440)}일 전`;
+  }
+  function homeKst(value) {
+    const d = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(d.getTime())) return { day: '—', clock: '—' };
+    try {
+      const parts = new Intl.DateTimeFormat('ko-KR', {
+        timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
+      }).formatToParts(d);
+      const get = (type) => (parts.find((part) => part.type === type) || {}).value || '';
+      return { day: `${get('month')}/${get('day')}`, clock: `${get('hour')}:${get('minute')}` };
+    } catch (error) {
+      const iso = d.toISOString();
+      return { day: `${iso.slice(5, 7)}/${iso.slice(8, 10)}`, clock: iso.slice(11, 16) };
+    }
+  }
+  // '2026-11-26 12:00'(KST 문자열)에서 날짜·시각만
+  function homeBarKst(text) {
+    if (typeof text !== 'string' || !/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(text)) return null;
+    return { day: `${text.slice(5, 7)}/${text.slice(8, 10)}`, clock: text.slice(11, 16) };
+  }
+  const homeSideKo = (side) => (String(side || '').toUpperCase() === 'SHORT' ? '숏' : '롱');
+
+  /* ---- 화면 모드: 홈(home) ↔ 데모 주문 화면(demo) — 같은 '트레이딩' 탭 안에서 바꾼다 ---- */
+  function setTradeMode(mode) {
+    const next = mode === 'demo' ? 'demo' : 'home';
+    home.mode = next;
+    if (page) page.dataset.mode = next;
+    if (next === 'demo') {
+      // 홈에서 고른 코인을 데모 주문 화면에도 그대로 넘긴다
+      const symbol = `${home.coin}USDT`;
+      if (state.symbol !== symbol) {
+        state.symbol = symbol;
+        state.price = null;
+        state.change = null;
+        state.book = { bids: new Map(), asks: new Map() };
+        if ($('#trade-coin')) $('#trade-coin').value = home.coin;
+        if ($('#trade-price')) $('#trade-price').textContent = '—';
+        if ($('#trade-change')) $('#trade-change').textContent = '—';
+        renderOrderBook();
+      }
+      loadMarket();
+      if (state.mobileView === 'chart') requestAnimationFrame(mountTradingView);
+    } else {
+      requestAnimationFrame(mountHomeTv);
+      loadHomeData();
+    }
+  }
+
+  /* ---- 차트: 트레이딩뷰 공식 위젯 하나 (가짜 차트 금지) ---- */
+  function showHomeTvNote(text) {
+    const note = $('#th-tv-note');
+    if (!note) return;
+    note.textContent = text;
+    note.classList.remove('hidden');
+  }
+  function hideHomeTvNote() {
+    const note = $('#th-tv-note');
+    if (note) note.classList.add('hidden');
+  }
+  function paintHomeSymbol() {
+    const el = $('#th-tv-symbol');
+    if (el) el.textContent = homeSymbol(home.coin);
+  }
+  function mountHomeTv() {
+    if (home.mode !== 'home' || state.view !== 'trading') return;
+    const host = $('#th-tv-chart');
+    if (!host || !host.clientWidth || !host.clientHeight) return;
+    const symbol = homeSymbol(home.coin);
+    if (home.widget && home.tvSymbol === symbol && home.tvInterval === home.frame) return;
+    home.tvSymbol = symbol;
+    home.tvInterval = home.frame;
+    showHomeTvNote('트레이딩뷰 차트를 불러오는 중…');
+    loadTvScript().then(() => {
+      if (home.mode !== 'home' || state.view !== 'trading') return;
+      if (homeSymbol(home.coin) !== symbol || home.frame !== home.tvInterval) return;
+      requestAnimationFrame(() => {
+        if (!host.clientWidth || !host.clientHeight) return;
+        host.innerHTML = '';
+        try {
+          home.widget = new window.TradingView.widget({
+            container_id: 'th-tv-chart',
+            symbol,
+            interval: home.frame,
+            theme: 'dark',
+            style: '1',
+            locale: 'kr',
+            timezone: 'Asia/Seoul',
+            toolbar_bg: '#10151e',
+            backgroundColor: '#0b0e13',
+            gridColor: 'rgba(38,49,67,.55)',
+            autosize: true,
+            hide_top_toolbar: false,
+            hide_side_toolbar: window.innerWidth <= 768,
+            allow_symbol_change: false,
+            save_image: false,
+            withdateranges: true,
+            details: false,
+            hotlist: false,
+            enable_publishing: false,
+            disabled_features: ['header_symbol_search', 'symbol_search_hot_key', 'header_compare', 'header_screenshot', 'header_fullscreen_button', 'header_undo_redo'],
+          });
+          const iframe = host.querySelector('iframe');
+          if (iframe) iframe.addEventListener('load', hideHomeTvNote);
+          if (home.noteTimer) clearTimeout(home.noteTimer);
+          home.noteTimer = setTimeout(hideHomeTvNote, 8000);
+        } catch (error) {
+          showHomeTvNote('트레이딩뷰 위젯을 띄우지 못했어요. 새로고침 후 다시 시도해 주세요.');
+        }
+      });
+    }).catch(() => {
+      showHomeTvNote('트레이딩뷰 위젯을 불러오지 못했어요. 인터넷 연결이나 광고 차단 설정을 확인해 주세요.');
+    });
+  }
+
+  /* ---- 기록: 실제 파일만 읽는다 ---- */
+  async function loadHomeData() {
+    if (home.mode !== 'home' || state.view !== 'trading') return;
+    const seq = ++home.seq;
+    const bust = `?t=${Date.now()}`;
+    let paper = null;
+    let logText = '';
+    try {
+      const res = await fetch(HOME_STATE_URL + bust, { cache: 'no-store' });
+      if (res.ok) paper = await res.json();
+    } catch (error) { paper = null; }
+    try {
+      const res = await fetch(HOME_LOG_URL + bust, { cache: 'no-store' });
+      if (res.ok) logText = await res.text();
+    } catch (error) { logText = ''; }
+    if (seq !== home.seq) return;
+    home.paper = paper && typeof paper === 'object' ? paper : null;
+    home.error = home.paper ? '' : '데모 기록을 불러오지 못했습니다';
+    home.log = logText.split('\n').filter((line) => line.trim())
+      .map((line) => { try { return JSON.parse(line); } catch (error) { return null; } })
+      .filter(Boolean).slice(-40);
+    home.at = Date.now();
+    paintHome();
+  }
+
+  function paintHome() {
+    if (!page || home.mode !== 'home') return;
+    const paper = home.paper;
+    const pos = paper && paper.position ? paper.position : null;
+    const closed = paper && Array.isArray(paper.closed) ? paper.closed : [];
+    const last = home.log.length ? home.log[home.log.length - 1] : null;
+
+    // 상태 바: 실전 미연결은 사실 그대로, 데모 기록이 있으면 언제 갱신됐는지 함께 적는다
+    const note = $('#th-conn-note');
+    if (note) {
+      if (paper) {
+        note.textContent = `데모 기록 ${homeAgeText(paper.updated_at) || '—'} 갱신`;
+        note.classList.toggle('dim', !last);
+      } else {
+        note.textContent = home.error || '데모 기록 없음';
+        note.classList.add('dim');
+      }
+    }
+
+    // 1 판정 — 연결 전 안내 문구는 그대로 두고, 실제 30분봉 AI 판정 요약을 보조로 붙인다
+    const line = $('#th-verdict-line');
+    if (line) {
+      const ai = pos && pos.ai ? pos.ai : null;
+      const when = (pos && pos.last_bar_time) ? homeKst(Number(pos.last_bar_time)) : (last && homeBarKst(last.bar_kst)) || null;
+      if (ai) {
+        const loss = Number.isFinite(Number(ai.loss_prob)) ? ` · 손실확률 ${Number(ai.loss_prob).toFixed(0)}%` : '';
+        line.innerHTML = `최근 30분봉 AI 판정 · <b>${safe(ai.decision || '—')}</b>${loss}<em>${when ? `${when.day} ${when.clock} 기준` : ''}</em>`;
+      } else if (paper) {
+        line.textContent = '최근 30분봉 AI 판정 · 보유 포지션 없음 (다음 스캔 대기)';
+      } else {
+        line.textContent = '최근 30분봉 AI 판정 · 기록을 불러오지 못했습니다';
+      }
+    }
+
+    // 오토 모드 상태 상자 — 실제 모의 포지션이 있으면 그대로 적는다
+    const box = $('#th-auto-state');
+    if (box) {
+      const localOpen = LITE.paper && typeof LITE.paper.snapshot === 'function' ? LITE.paper.snapshot().open : [];
+      if (pos) {
+        const when = homeKst(pos.entry_time);
+        box.className = 'th-state on';
+        box.textContent = `● 모의 ${homeSideKo(pos.side)} ${priceText(pos.entry)} 보유 · ${Number(pos.bars) || 0}봉 · ${when.day} ${when.clock} 진입`;
+      } else if (localOpen && localOpen.length) {
+        box.className = 'th-state on';
+        box.textContent = `● 로컬 모의 ${localOpen.length}건 보유 (이 브라우저 주문)`;
+      } else if (paper && closed.length) {
+        const trade = closed[closed.length - 1];
+        const r = Number(trade.r);
+        box.className = 'th-state';
+        box.textContent = `○ 지금 열린 포지션 없음 · 최근 ${HOME_REASON_KO[trade.reason] || '청산'} ${Number.isFinite(r) ? `${r > 0 ? '+' : ''}${r.toFixed(2)}R` : ''}`.trim();
+      } else {
+        box.className = 'th-state';
+        box.textContent = '○ 지금 열린 포지션 없음 (연결 대기)';
+      }
+    }
+
+    paintHomeSignals(paper, pos, closed, last);
+  }
+
+  function paintHomeSignals(paper, pos, closed, last) {
+    const list = $('#th-sig-list');
+    const foot = $('#th-sig-foot');
+    if (!list) return;
+    const rows = [];
+    // 1) 실제 청산 기록 (최근 3건) — %는 위험금(증거금) 대비, 거래 비용 반영된 pnl 기준
+    closed.slice(-3).reverse().forEach((trade) => {
+      const when = homeKst(trade.exit_time);
+      const r = Number(trade.r);
+      const pnl = Number(trade.pnl);
+      const pct = Number.isFinite(r) ? `${r > 0 ? '+' : r < 0 ? '−' : ''}${Math.abs(r * 100).toFixed(1)}%` : '—';
+      const amount = Number.isFinite(pnl) ? `${pnl >= 0 ? '+' : '−'}${Math.abs(pnl).toFixed(2)} USDT` : '—';
+      rows.push(`<li><span class="th-sig-when">${when.day} ${when.clock}</span><span class="th-sig-what"><b>${safe(String(trade.symbol || (paper && paper.symbol) || 'BTC').replace(/USDT$/, ''))} ${homeSideKo(trade.side)}</b> · ${safe(HOME_REASON_KO[trade.reason] || '청산')} <b class="${Number.isFinite(pnl) && pnl < 0 ? 'down' : 'up'}">${pct}</b> <em>(실현 ${amount})</em></span></li>`);
+    });
+    // 2) 지금 보유 중인 모의 포지션
+    if (pos) {
+      const when = homeKst(pos.entry_time);
+      rows.push(`<li><span class="th-sig-when">${when.day} ${when.clock}</span><span class="th-sig-what"><b>${safe(String((paper && paper.symbol) || 'BTC').replace(/USDT$/, ''))} ${homeSideKo(pos.side)}</b> · 보유 중 <em>(진입 ${priceText(pos.entry)} · ${Number(pos.bars) || 0}봉)</em></span></li>`);
+    }
+    // 3) 최근 30분봉 스캔 (진입·관망·건너뜀)
+    if (last && last.action) {
+      const when = homeBarKst(last.bar_kst) || homeKst(last.bar || last.ts);
+      const price = Number(last.price);
+      rows.push(`<li><span class="th-sig-when">${when.day} ${when.clock}</span><span class="th-sig-what"><b>${safe(String((paper && paper.symbol) || 'BTC').replace(/USDT$/, ''))}</b> 스캔 · ${safe(HOME_ACTION_KO[last.action] || last.action)} <em>(${Number.isFinite(price) ? priceText(price) : '—'})</em></span></li>`);
+    }
+    // 4) 검증된 백테스트 참고 — 데모/실전 신호가 아니라고 이름에 적는다
+    rows.push(`<li class="th-sig-ref"><span class="th-sig-when">백테스트</span><span class="th-sig-what">${safe(HOME_BACKTEST)} <em>(3.4년 88건 · 2026-11-19 검증)</em></span></li>`);
+    if (!paper && !rows.length) rows.push('<li class="th-sig-empty">기록 없음 · 30분봉 스캔이 쌓이면 여기에 표시됩니다.</li>');
+    list.innerHTML = rows.join('');
+    if (foot) {
+      const clock = home.at ? homeKst(new Date(home.at)).clock : '';
+      foot.textContent = `기준: data/paper_state.json · data/paper_log.jsonl${clock ? ` · ${clock} 확인` : ''}`;
+    }
+  }
+
+  /* ---- 가이드 · 실전 안내 창 ---- */
+  const HOME_MODALS = {
+    guide: {
+      title: '바이비트 연결 · 이용 가이드',
+      body: `
+        <p class="th-modal-lead">지금은 <b>실전 키가 연결되지 않은 상태</b>입니다. 주문 버튼은 모두 모의(데모)로만 동작합니다.</p>
+        <ol class="th-steps">
+          <li><b>바이비트 API 키 만들기</b> — Bybit → API 관리 → 새 키. 권한은 <b>읽기</b>와 <b>선물 주문</b>만 켜고 출금은 켜지 않습니다.</li>
+          <li><b>PC에 키 넣기</b> — <code>backend/.env</code>에 <code>BYBIT_API_KEY</code> · <code>BYBIT_API_SECRET</code>, 데모는 <code>BYBIT_DEMO=true</code>.</li>
+          <li><b>모의 계좌로 먼저</b> — <code>python -m backend.testnet_auto --loop --demo</code> (Demo Trading 계좌 · 실제 주문 없음).</li>
+          <li><b>이 화면에 반영</b> — 30분봉 기록이 <code>data/paper_state.json</code> · <code>data/paper_log.jsonl</code>에 쌓이면 '최근 익절 · 청산 신호'와 오토 모드 상태에 자동으로 나타납니다.</li>
+        </ol>
+        <p class="th-modal-foot">차트는 트레이딩뷰 실시간 시세(BYBIT 무기한)입니다. 시세·기록이 없으면 값을 지어내지 않고 '기록 없음'으로 적습니다.</p>`,
+    },
+    live: {
+      title: '실전 안내 · 소액 원칙',
+      body: `
+        <p class="th-modal-lead">실전은 홍원 님이 정한 고정 규칙을 그대로 씁니다. 규칙은 화면에서 바꾸지 않습니다.</p>
+        <ul class="th-rules">
+          <li>시드 최소 <b>50 USDT</b></li>
+          <li>1회 손실 <b>3%</b> (50달러 기준 1.5달러)</li>
+          <li>최대 레버리지 <b>3배</b> · 동시 <b>1포지션</b></li>
+          <li>30분봉 M1 · <b>아시아 세션(00~08 UTC)</b> · 목표 <b>4R</b></li>
+          <li>진입은 Gemini AI 필터가 PASS일 때만</li>
+        </ul>
+        <p class="th-modal-foot">현재 상태: 실전 키 미연결 — 주문이 거래소로 전송되지 않습니다. 데모 모드로 먼저 확인하세요.</p>`,
+    },
+  };
+
+  function openHomeModal(key) {
+    const data = HOME_MODALS[key];
+    if (!data) return;
+    const modal = $('#th-modal');
+    if (!modal) return;
+    $('#th-modal-title').textContent = data.title;
+    $('#th-modal-body').innerHTML = data.body;
+    modal.dataset.key = key;
+    modal.classList.remove('hidden');
+    const close = $('#th-modal-close');
+    if (close) close.focus();
+  }
+  function closeHomeModal() {
+    const modal = $('#th-modal');
+    if (modal) modal.classList.add('hidden');
+  }
+
+  // 가이드 · 실전 안내 · 연결 — 바이비트 연결은 ⚙️ 설정 창(연결 상태)을 그대로 연다
+  function openConnectSettings() {
+    if (window.LiteCockpit && typeof window.LiteCockpit.open === 'function') {
+      window.LiteCockpit.open();
+      return;
+    }
+    openHomeModal('guide');
+  }
+
+  function wireHome() {
+    const coins = $('#th-coins');
+    if (coins) {
+      coins.addEventListener('click', (event) => {
+        const button = event.target.closest('[data-coin]');
+        if (!button || button.dataset.coin === home.coin) return;
+        home.coin = button.dataset.coin;
+        $$('#th-coins [data-coin]').forEach((el) => {
+          const on = el.dataset.coin === home.coin;
+          el.classList.toggle('active', on);
+          el.setAttribute('aria-pressed', String(on));
+        });
+        paintHomeSymbol();
+        mountHomeTv();
+      });
+    }
+    const frames = $('#th-frames');
+    if (frames) {
+      frames.addEventListener('click', (event) => {
+        const button = event.target.closest('[data-frame]');
+        if (!button || button.dataset.frame === home.frame) return;
+        home.frame = button.dataset.frame;
+        $$('#th-frames [data-frame]').forEach((el) => {
+          const on = el.dataset.frame === home.frame;
+          el.classList.toggle('active', on);
+          el.setAttribute('aria-pressed', String(on));
+        });
+        mountHomeTv();
+      });
+    }
+    if ($('#th-guide')) $('#th-guide').addEventListener('click', () => openHomeModal('guide'));
+    if ($('#th-live-guide')) $('#th-live-guide').addEventListener('click', () => openHomeModal('live'));
+    if ($('#th-connect')) $('#th-connect').addEventListener('click', openConnectSettings);
+    if ($('#th-demo')) $('#th-demo').addEventListener('click', () => setTradeMode('demo'));
+    if ($('#trade-home-back')) $('#trade-home-back').addEventListener('click', () => setTradeMode('home'));
+    if ($('#th-modal-close')) $('#th-modal-close').addEventListener('click', closeHomeModal);
+    if ($('#th-modal-ok')) $('#th-modal-ok').addEventListener('click', closeHomeModal);
+    if ($('#th-modal-settings')) $('#th-modal-settings').addEventListener('click', () => { closeHomeModal(); openConnectSettings(); });
+    const modal = $('#th-modal');
+    if (modal) modal.addEventListener('click', (event) => { if (event.target === modal) closeHomeModal(); });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && modal && !modal.classList.contains('hidden')) closeHomeModal();
+    });
+    window.addEventListener('resize', () => requestAnimationFrame(mountHomeTv));
+  }
+
   function refreshPositions() {
     renderPositions();
     refreshSubscriptions();
@@ -755,10 +1186,12 @@
     $('#trade-change').textContent = '—';
     if (select && base) select.value = base;
     setMobileView('chart');
+    setTradeMode('demo');
     setView('trading');
   }
 
-  window.LiteTrading = { show: () => setView('trading'), showSymbol, office: () => setView('office'), screener: () => setView('screener'), whale: () => setView('whale'), dash: () => setView('dash'), loadMarket, renderPositions, setDecision };
+  // '데모 트레이딩 바로가기'·스크리너에서 오면 같은 트레이딩 탭의 데모 주문 화면을 바로 연다
+  window.LiteTrading = { show: () => { setTradeMode('demo'); setView('trading'); }, showSymbol, office: () => setView('office'), screener: () => setView('screener'), whale: () => setView('whale'), dash: () => setView('dash'), loadMarket, renderPositions, setDecision, setTradeMode, openConnectSettings };
 
   // 첫 화면 클래스·탭 상태를 정한다 (대시보드가 기본 — 소개 페이지 임베드는 사무실)
   setView(state.view);
