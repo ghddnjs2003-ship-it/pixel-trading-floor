@@ -1,7 +1,7 @@
 {
   "date": "2026-11-26",
   "start_equity": 10000.0,
-  "equity": 9951.02942167907,
+  "equity": 9951.03,
   "realized_pnl": -48.97,
   "trades": 1,
   "wins": 0,
@@ -11,5 +11,5 @@
   "trip_reason": "",
   "tripped_until": null,
   "manual_stop": false,
-  "last_update": "2026-11-26T14:00:07+09:00"
+  "last_update": "2026-11-26T14:30:11+09:00"
 }
