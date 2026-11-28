@@ -1,5 +1,5 @@
 {
-  "date": "2026-11-28",
+  "date": "2026-11-29",
   "start_equity": 9951.03,
   "equity": 9951.03,
   "realized_pnl": 0.0,
@@ -11,5 +11,5 @@
   "trip_reason": "",
   "tripped_until": null,
   "manual_stop": false,
-  "last_update": "2026-11-28T23:30:28+09:00"
+  "last_update": "2026-11-29T00:00:21+09:00"
 }
