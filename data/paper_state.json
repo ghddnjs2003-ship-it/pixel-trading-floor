@@ -13,12 +13,43 @@
     "max_bars": 96
   },
   "created_at": "2026-11-19T05:49:16+00:00",
-  "updated_at": "2026-11-28T06:30:21+00:00",
-  "scan_bar": 1795845600000,
-  "scan_count": 368,
+  "updated_at": "2026-11-28T07:00:18+00:00",
+  "scan_bar": 1795847400000,
+  "scan_count": 369,
   "initial_equity": 10000.0,
   "equity": 9951.03,
-  "position": null,
+  "position": {
+    "side": "SHORT",
+    "entry": 59705.4565,
+    "stop": 60379.7477,
+    "target": 57008.2918,
+    "initial_stop": 60379.7477,
+    "qty": 0.14757764,
+    "risk_usd": 99.51,
+    "risk": 674.2912,
+    "atr": 224.76372912405128,
+    "signal_time": 1795847400000,
+    "entry_time": "2026-11-28T07:00:18+00:00",
+    "entry_bar_time": 1795849200000,
+    "last_bar_time": null,
+    "bars": 0,
+    "ai": {
+      "decision": "PASS",
+      "loss_prob": 35.0,
+      "reason": "4H 및 30분봉 EMA 하락 추세에 순응하며 1R 이내(0.57 ATR) 매물대 외에 주요 장애물이 없어 4R 목표 달성 가능성이 높음.",
+      "confidence": 50,
+      "risk_flags": [
+        "ATR% 낮음(0.38%)로 인한 노이즈 주의"
+      ],
+      "cached": false,
+      "error": null,
+      "model": "gemini-3.5-flash-lite"
+    },
+    "reasons": [
+      "존 하단 59,862.8 돌파 뒤 첫 리테스트 저항",
+      "손절 60,391.7(ATR) · 목표 1.5R 대체"
+    ]
+  },
   "closed": [
     {
       "side": "SHORT",
@@ -65,7 +96,8 @@
     "1795494600000|SHORT",
     "1795629600000|LONG",
     "1795748400000|LONG",
-    "1795797000000|SHORT"
+    "1795797000000|SHORT",
+    "1795847400000|SHORT"
   ],
   "killswitch": {
     "ok": true,
@@ -86,10 +118,12 @@
     }
   },
   "last_scan": {
-    "ts": "2026-11-28T06:30:21+00:00",
-    "bar": "2026-11-28T06:00:00+00:00",
-    "action": "HOLD",
-    "events": [],
-    "price": 59822.5
+    "ts": "2026-11-28T07:00:18+00:00",
+    "bar": "2026-11-28T06:30:00+00:00",
+    "action": "OPEN",
+    "events": [
+      "모의 숏 진입 59,705.46 · 손절 60,379.75 · 목표 57,008.29 (4R) · 리스크 99.51 USDT"
+    ],
+    "price": 59717.4
   }
 }
